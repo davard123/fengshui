@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "九宫风水参考",
+    "slug": "fengshui-app",
+    "scheme": "fengshui-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#fffaf3"
+    },
+    "platforms": ["ios", "android", "web"],
+
+    "ios": {
+      "bundleIdentifier": "com.davidlo.fengshuiapp",
+      "buildNumber": "1",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "用于在地图上定位您输入的房产地址，进行周边环境分析。",
+        "NSMotionUsageDescription": "用于读取手机指南针（磁力计），帮助您锁定房屋的精确朝向。",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+
+    "android": {
+      "package": "com.davidlo.fengshuiapp",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#fffaf3"
+      },
+      "permissions": []
+    },
+
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+
+    "plugins": [
+      "expo-router/plugin",
+      [
+        "expo-sensors",
+        { "motionPermission": "用于读取罗盘/指南针方向数据。" }
+      ]
+    ],
+
+    "extra": {
+      "router": { "origin": false },
+      "eas": { "projectId": "" }
+    }
+  }
+}

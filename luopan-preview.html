@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>罗盘预览 · 二十四山</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:#0e0a04;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    min-height:100vh; font-family:serif;
+    color:#c8a030; gap:18px; padding:20px;
+  }
+  h1 { font-size:17px; letter-spacing:4px; color:#c8a030; text-shadow:0 0 12px #8b6010; }
+  #compass-wrap { position:relative; width:380px; height:380px; }
+  #disc { position:absolute; inset:0; transform-origin:center; transition:transform .18s ease-out; }
+  #needle-layer { position:absolute; inset:0; pointer-events:none; }
+  .needle-svg { width:100%; height:100%; position:absolute; top:0; left:0; }
+  #top-marker {
+    position:absolute; top:0; left:50%; transform:translateX(-50%);
+    color:#cc2200; font-size:20px; font-weight:900;
+    text-shadow:0 0 10px #ff4400; z-index:10; pointer-events:none;
+  }
+  .controls { display:flex; flex-direction:column; align-items:center; gap:12px; width:380px; }
+  .slider-row { display:flex; align-items:center; gap:12px; width:100%; }
+  input[type=range] {
+    flex:1; -webkit-appearance:none; height:4px;
+    background:#3a2a08; border-radius:2px; outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:18px; height:18px;
+    border-radius:50%; background:#c8a030; cursor:pointer;
+  }
+  .readout { display:flex; gap:20px; align-items:center; }
+  .mountain-big { font-size:52px; font-weight:900; color:#f0d060;
+    text-shadow:0 2px 8px #8b6010,0 0 24px #c8a030; min-width:65px; text-align:center; }
+  .mountain-info { font-size:13px; color:#a88020; line-height:1.9; }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  button {
+    padding:7px 15px; border:1px solid #c8a030; background:transparent;
+    color:#c8a030; font-family:serif; font-size:12px; cursor:pointer;
+    border-radius:4px; letter-spacing:1px; transition:all .2s;
+  }
+  button:hover,button.active { background:#c8a030; color:#0e0a04; }
+  #btnMode { border-color:#5a8040; color:#8ab060; }
+  #btnMode:hover,#btnMode.active { background:#4a6030; color:#d0f0a0; border-color:#4a6030; }
+  #status { font-size:12px; letter-spacing:2px; }
+
+  /* 图片版覆盖 */
+  #disc-img-wrap {
+    position:absolute; inset:0;
+    display:none; align-items:center; justify-content:center;
+    transform-origin:center; transition:transform .18s ease-out;
+  }
+  #disc-img-wrap.show { display:flex; }
+  #disc-img {
+    width:104%; height:104%;
+    object-fit:contain; border-radius:50%;
+  }
+  #img-center {
+    position:absolute; left:50%; top:50%;
+    transform:translate(-50%,-50%);
+    width:100px; height:100px; border-radius:50%;
+    background:radial-gradient(circle,#f5edd8 55%,#e8d4a8 90%,#c8a030 100%);
+    border:2.5px solid #8b6010;
+    box-shadow:0 0 10px rgba(0,0,0,.7),inset 0 0 6px rgba(200,160,48,.2);
+    z-index:10; display:none;
+  }
+  #img-center.show { display:block; }
+  #img-center::after {
+    content:''; position:absolute; inset:9px;
+    border-radius:50%; border:1px dashed rgba(200,160,48,.4);
+  }
+</style>
+</head>
+<body>
+<h1>二十四山罗盘</h1>
+
+<div id="compass-wrap">
+  <div id="top-marker">▼</div>
+
+  <!-- SVG 旋转盘 -->
+  <svg id="disc" viewBox="0 0 380 380" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#2e1e08"/>
+        <stop offset="100%" stop-color="#1a0e03"/>
+      </radialGradient>
+      <filter id="engrave">
+        <feDropShadow dx="0" dy="1" stdDeviation=".6" flood-color="#1a0800" flood-opacity=".9"/>
+      </filter>
+    </defs>
+
+    <!-- 深色底盘 -->
+    <circle cx="190" cy="190" r="188" fill="url(#bg)" stroke="#6a4a10" stroke-width="1.5"/>
+    <!-- 最外装饰圈（回纹简化） -->
+    <circle cx="190" cy="190" r="185" fill="none" stroke="#c8a030" stroke-width="1.5"/>
+    <circle cx="190" cy="190" r="181" fill="none" stroke="#8b6010" stroke-width=".5" stroke-dasharray="5,3"/>
+
+    <!-- 各功能圈 -->
+    <g id="r24"></g>     <!-- 圈1：二十四山  r=160-180 -->
+    <g id="rTG"></g>     <!-- 圈2：天干地支  r=138-158 -->
+    <g id="r9S"></g>     <!-- 圈3：九星      r=116-136 -->
+    <g id="rHT"></g>     <!-- 圈4：后天八卦  r=94-114  -->
+    <g id="rXT"></g>     <!-- 圈5：先天八卦  r=74-92   -->
+
+    <!-- 天池 -->
+    <circle cx="190" cy="190" r="72" fill="#f2e8d0" stroke="#8b6010" stroke-width="2.5"/>
+    <circle cx="190" cy="190" r="67" fill="none" stroke="#c8a030" stroke-width=".8" stroke-dasharray="4,4"/>
+    <text x="172" y="196" font-size="15" fill="#3a1a00" font-family="serif" filter="url(#engrave)">天</text>
+    <text x="191" y="196" font-size="15" fill="#3a1a00" font-family="serif" filter="url(#engrave)">池</text>
+  </svg>
+
+  <!-- 图片旋转盘（图片版） -->
+  <div id="disc-img-wrap">
+    <img id="disc-img" src="assets/luopan.png" alt="罗盘"/>
+  </div>
+  <div id="img-center"></div>
+
+  <!-- 固定指针（两模式共用） -->
+  <svg class="needle-svg" viewBox="0 0 380 380" xmlns="http://www.w3.org/2000/svg">
+    <polygon points="190,110 184,190 196,190" fill="#cc2200"
+      style="filter:drop-shadow(0 0 6px #ff2200)"/>
+    <polygon points="190,270 184,190 196,190" fill="#c8b060"
+      style="filter:drop-shadow(0 0 3px #8b6010)"/>
+    <circle cx="190" cy="190" r="9" fill="#6a4010" stroke="#c8a030" stroke-width="2"/>
+    <circle cx="190" cy="190" r="4" fill="#f0d060"/>
+  </svg>
+</div>
+
+<div class="controls">
+  <div class="slider-row">
+    <span style="font-size:12px;width:24px">0°</span>
+    <input type="range" id="degSlider" min="0" max="359" value="0">
+    <span style="font-size:12px;width:32px">359°</span>
+  </div>
+  <div class="readout">
+    <span class="mountain-big" id="mName">子</span>
+    <div class="mountain-info">
+      <div id="mDeg">0°</div>
+      <div id="mSector">北方</div>
+      <div id="mElement">五行：水</div>
+    </div>
+  </div>
+  <div class="btns">
+    <button id="btnAuto">▶ 自动旋转</button>
+    <button id="btnStable">✓ 稳定</button>
+    <button id="btnReset">↺ 重置</button>
+    <button id="btnMode">🖼 切换图片版</button>
+  </div>
+  <div id="status" style="color:#4a7c59">● 方向稳定，可以锁定</div>
+</div>
+
+<script>
+const cx=190, cy=190
+const toR = d => d*Math.PI/180
+
+// ── 数据 ────────────────────────────────────────
+const M24=[
+  {n:"壬",c:345,s:"北",e:"水"},{n:"子",c:0,s:"北",e:"水"},{n:"癸",c:15,s:"北",e:"水"},
+  {n:"丑",c:30,s:"东北",e:"土"},{n:"艮",c:45,s:"东北",e:"土"},{n:"寅",c:60,s:"东北",e:"木"},
+  {n:"甲",c:75,s:"东",e:"木"},{n:"卯",c:90,s:"东",e:"木"},{n:"乙",c:105,s:"东",e:"木"},
+  {n:"辰",c:120,s:"东南",e:"土"},{n:"巽",c:135,s:"东南",e:"木"},{n:"巳",c:150,s:"东南",e:"火"},
+  {n:"丙",c:165,s:"南",e:"火"},{n:"午",c:180,s:"南",e:"火"},{n:"丁",c:195,s:"南",e:"火"},
+  {n:"未",c:210,s:"西南",e:"土"},{n:"坤",c:225,s:"西南",e:"土"},{n:"申",c:240,s:"西南",e:"金"},
+  {n:"庚",c:255,s:"西",e:"金"},{n:"酉",c:270,s:"西",e:"金"},{n:"辛",c:285,s:"西",e:"金"},
+  {n:"戌",c:300,s:"西北",e:"土"},{n:"乾",c:315,s:"西北",e:"金"},{n:"亥",c:330,s:"西北",e:"水"},
+]
+// 12地支，每支30°
+const DIZHI=[
+  {n:"子",c:0},{n:"丑",c:30},{n:"寅",c:60},{n:"卯",c:90},
+  {n:"辰",c:120},{n:"巳",c:150},{n:"午",c:180},{n:"未",c:210},
+  {n:"申",c:240},{n:"酉",c:270},{n:"戌",c:300},{n:"亥",c:330},
+]
+const NINESTAR=[
+  {n:"九紫",col:"#5a0808"},{n:"二黑",col:"#2a1808"},{n:"三碧",col:"#083a14"},
+  {n:"七赤",col:"#3a1400"},{n:"五黄",col:"#3a2e00"},{n:"六白",col:"#0c1e38"},
+  {n:"八白",col:"#101e2e"},{n:"一白",col:"#08103a"},{n:"四绿",col:"#083010"},
+]
+// 后天八卦（文王，从北顺时针）：坎艮震巽离坤兑乾
+const BAGUA_H = [
+  {n:"坎",col:"#0c1e38"},{n:"艮",col:"#1e1604"},{n:"震",col:"#083a14"},{n:"巽",col:"#0a3010"},
+  {n:"离",col:"#3a0808"},{n:"坤",col:"#2a1e04"},{n:"兑",col:"#1a1008"},{n:"乾",col:"#1e1808"},
+]
+// 先天八卦（伏羲）卦爻：每卦3爻，1=阳(实线) 0=阴(虚线)
+// 顺序从北(0°)顺时针：坤艮坎巽震离兑乾
+const BAGUA_XT = [
+  {n:"坤",yao:[0,0,0]},{n:"艮",yao:[1,0,0]},{n:"坎",yao:[0,1,0]},{n:"巽",yao:[1,1,0]},
+  {n:"震",yao:[0,0,1]},{n:"离",yao:[1,0,1]},{n:"兑",yao:[0,1,1]},{n:"乾",yao:[1,1,1]},
+]
+
+// 五行色
+const eleCol = {水:"#0c1e38",木:"#083a14",火:"#3a0808",土:"#2a1e04",金:"#2a2010"}
+
+// ── SVG 辅助 ─────────────────────────────────────
+function arc(r1,r2,s,e){
+  const sr=s-90,er=e-90,lg=(e-s)>180?1:0
+  const x1=cx+r2*Math.cos(toR(sr)),y1=cy+r2*Math.sin(toR(sr))
+  const x2=cx+r2*Math.cos(toR(er)),y2=cy+r2*Math.sin(toR(er))
+  const x3=cx+r1*Math.cos(toR(er)),y3=cy+r1*Math.sin(toR(er))
+  const x4=cx+r1*Math.cos(toR(sr)),y4=cy+r1*Math.sin(toR(sr))
+  return `M${x1},${y1} A${r2},${r2} 0 ${lg},1 ${x2},${y2} L${x3},${y3} A${r1},${r1} 0 ${lg},0 ${x4},${y4} Z`
+}
+function txt(r,angle,text,size,fill){
+  const a=toR(angle-90),tx=cx+r*Math.cos(a),ty=cy+r*Math.sin(a)
+  return `<text x="${tx}" y="${ty}" font-size="${size}" fill="${fill}" font-family="serif"
+    text-anchor="middle" dominant-baseline="central"
+    transform="rotate(${angle},${tx},${ty})"
+    style="filter:drop-shadow(0 1px 1px #1a0800)">${text}</text>`
+}
+
+// ── 绘制各圈 ─────────────────────────────────────
+
+// 圈1：二十四山 r=160-180
+let h=''
+M24.forEach(m=>{
+  const s=m.c-7.5,e=m.c+7.5,bg=eleCol[m.e]||'#1a1a08'
+  h+=`<path d="${arc(160,179,s,e)}" fill="${bg}" stroke="#c8a030" stroke-width=".8"/>`
+  h+=txt(170,m.c,m.n,11,'#f0d060')
+})
+document.getElementById('r24').innerHTML=h
+
+// 圈2：天干地支（12地支×30°）r=138-158
+h=''
+const dzCol={子:'#0c1e38',丑:'#1a1608',寅:'#083a14',卯:'#083a14',辰:'#1e1604',巳:'#3a0808',
+             午:'#3a0808',未:'#1e1604',申:'#1e1604',酉:'#1a1008',戌:'#1e1604',亥:'#0c1e38'}
+DIZHI.forEach(d=>{
+  const s=d.c-15,e=d.c+15
+  h+=`<path d="${arc(138,157,s,e)}" fill="${dzCol[d.n]||'#1a1008'}" stroke="#c8a030" stroke-width=".8"/>`
+  h+=txt(148,d.c,d.n,10,'#d4a840')
+})
+document.getElementById('rTG').innerHTML=h
+
+// 圈3：九星 r=116-136（9×40°）
+h=''
+NINESTAR.forEach((s,i)=>{
+  const sa=i*40,ea=(i+1)*40
+  h+=`<path d="${arc(116,135,sa,ea)}" fill="${s.col}" stroke="#c8a030" stroke-width=".8"/>`
+  h+=txt(126,sa+20,s.n,8.5,'#c8a030')
+})
+document.getElementById('r9S').innerHTML=h
+
+// 圈4：后天八卦（文王）r=94-114，各卦元素配色 + 名称
+h=''
+BAGUA_H.forEach((b,i)=>{
+  const sa=i*45, ea=(i+1)*45
+  h+=`<path d="${arc(94,113,sa,ea)}" fill="${b.col}" stroke="#c8a030" stroke-width=".8"/>`
+  h+=txt(104,sa+22.5,b.n,12.5,'#f0d060')
+})
+document.getElementById('rHT').innerHTML=h
+
+// 圈5：先天八卦（伏羲）r=74-92，画卦爻线条 + 卦名小字
+h=''
+BAGUA_XT.forEach((b,i)=>{
+  const sa=i*45, ea=(i+1)*45, mid=sa+22.5
+  h+=`<path d="${arc(74,91,sa,ea)}" fill="#100a02" stroke="#c8a030" stroke-width=".8"/>`
+  const a=toR(mid-90)
+  const bx=cx+83*Math.cos(a), by=cy+83*Math.sin(a)
+  const rot=mid
+  // 爻线：在扇形中偏外侧 (r≈85)
+  const lineW=8, gap=3.2
+  for(let li=0;li<3;li++){
+    const lx=bx, ly=by+(li-1)*gap-3  // shift up a bit to leave room for name
+    if(b.yao[2-li]===1){
+      h+=`<line x1="${lx-lineW/2}" y1="${ly}" x2="${lx+lineW/2}" y2="${ly}"
+        stroke="#f0d060" stroke-width="1.8" stroke-linecap="round"
+        transform="rotate(${rot},${bx},${by})"/>`
+    } else {
+      h+=`<line x1="${lx-lineW/2}" y1="${ly}" x2="${lx-1.2}" y2="${ly}"
+        stroke="#a08840" stroke-width="1.8" stroke-linecap="round"
+        transform="rotate(${rot},${bx},${by})"/>`
+      h+=`<line x1="${lx+1.2}" y1="${ly}" x2="${lx+lineW/2}" y2="${ly}"
+        stroke="#a08840" stroke-width="1.8" stroke-linecap="round"
+        transform="rotate(${rot},${bx},${by})"/>`
+    }
+  }
+  // 卦名小字（在爻线下方）
+  const nx=cx+80*Math.cos(a), ny=cy+80*Math.sin(a)
+  h+=`<text x="${nx}" y="${ny+5.5}" font-size="7" fill="#806830" font-family="serif"
+    text-anchor="middle" dominant-baseline="central"
+    transform="rotate(${rot},${nx},${ny+5.5})">${b.n}</text>`
+})
+document.getElementById('rXT').innerHTML=h
+
+// ── 模式切换 ─────────────────────────────────────
+let mode='svg'
+const discSvg=document.getElementById('disc')
+const discImgWrap=document.getElementById('disc-img-wrap')
+const imgCenter=document.getElementById('img-center')
+const btnMode=document.getElementById('btnMode')
+
+function setMode(m){
+  mode=m
+  if(m==='img'){
+    discSvg.style.display='none'
+    discImgWrap.classList.add('show')
+    imgCenter.classList.add('show')
+    btnMode.textContent='◎ 切换SVG版'; btnMode.classList.add('active')
+  } else {
+    discSvg.style.display='block'
+    discImgWrap.classList.remove('show')
+    imgCenter.classList.remove('show')
+    btnMode.textContent='🖼 切换图片版'; btnMode.classList.remove('active')
+  }
+}
+btnMode.addEventListener('click',()=>setMode(mode==='svg'?'img':'svg'))
+
+// ── 旋转逻辑 ─────────────────────────────────────
+let cur=0, timer=null
+
+function getMountain(deg){
+  const d=((deg%360)+360)%360
+  if(d>=352.5||d<7.5) return M24[1]
+  if(d>=337.5&&d<352.5) return M24[0]
+  return M24.find(m=>m.n!=='壬'&&m.n!=='子'&&d>=m.c-7.5&&d<m.c+7.5)||M24[1]
+}
+
+function update(d){
+  cur=((d%360)+360)%360
+  const rot=`rotate(${-cur}deg)`
+  discSvg.style.transform=rot
+  discImgWrap.style.transform=rot
+  document.getElementById('degSlider').value=Math.round(cur)
+  const m=getMountain(cur)
+  document.getElementById('mName').textContent=m.n
+  document.getElementById('mDeg').textContent=`${Math.round(cur)}°`
+  document.getElementById('mSector').textContent=m.s+'方'
+  document.getElementById('mElement').textContent='五行：'+m.e
+}
+
+document.getElementById('degSlider').addEventListener('input',e=>{stopAuto();update(+e.target.value)})
+
+const btnAuto=document.getElementById('btnAuto')
+btnAuto.addEventListener('click',function(){
+  if(timer){stopAuto();return}
+  this.classList.add('active');this.textContent='⏹ 停止'
+  timer=setInterval(()=>update(cur+1.0),30)
+})
+function stopAuto(){
+  clearInterval(timer);timer=null
+  btnAuto.classList.remove('active');btnAuto.textContent='▶ 自动旋转'
+}
+document.getElementById('btnStable').addEventListener('click',()=>{})
+document.getElementById('btnReset').addEventListener('click',()=>{stopAuto();update(0)})
+
+update(0)
+</script>
+</body>
+</html>

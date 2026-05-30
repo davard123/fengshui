@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>罗盘预览 · 图片版</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0e0a04;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 100vh; font-family: serif;
+    color: #c8a030; gap: 20px; padding: 24px;
+  }
+  h1 { font-size: 18px; letter-spacing: 4px; color: #c8a030;
+       text-shadow: 0 0 12px #8b6010; }
+
+  /* 外框：固定可见区域 360×360 的正圆 */
+  #frame {
+    width: 360px; height: 360px;
+    border-radius: 50%;
+    overflow: hidden;
+    position: relative;
+    /* 金色光晕边框 */
+    box-shadow: 0 0 0 3px #8b6010, 0 0 20px #5a3a08;
+  }
+
+  /* 图片旋转层：比外框大 10%，让外圈完整显示不被裁 */
+  #disc-wrap {
+    position: absolute;
+    /* 放大 108%，上下左右各缩进 -4%（=(108-100)/2=4） */
+    width: 108%; height: 108%;
+    left: -4%; top: -4%;
+    transform-origin: center;
+    transition: transform 0.18s ease-out;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #disc-img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
+  /* 中心遮罩：覆盖原图 天池+指针，精确对准圆心 */
+  #center-mask {
+    position: absolute;
+    /* 圆心在 frame 的 50%，50%；遮罩尺寸根据原图天池大小 */
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    /* 原图天池约占总直径 19%，frame=360px → 天池≈68px 半径=34px
+       加上 108% 放大系数 → 34×1.08≈37px，取 76px 直径 + 余量=92px */
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    background: radial-gradient(circle at center, #f5edd8 55%, #e8d4a8 85%, #c8a030 100%);
+    border: 2.5px solid #8b6010;
+    box-shadow: 0 0 10px rgba(0,0,0,0.7), inset 0 0 6px rgba(200,160,48,0.2);
+    z-index: 10;
+  }
+  /* 天池内虚线圆 */
+  #center-mask::after {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    border: 1px dashed rgba(200,160,48,0.4);
+  }
+
+  /* 固定指针层（不随图片旋转）*/
+  #needle-svg {
+    position: absolute; inset: 0;
+    width: 360px; height: 360px;
+    z-index: 20; pointer-events: none;
+  }
+
+  /* 顶部固定 ▼ 标记 */
+  #top-marker {
+    position: absolute;
+    top: 4px; left: 50%;
+    transform: translateX(-50%);
+    color: #cc2200; font-size: 20px; font-weight: 900;
+    text-shadow: 0 0 10px #ff4400;
+    z-index: 30; pointer-events: none;
+  }
+
+  /* ── 控制区 ── */
+  .controls {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 14px; width: 360px;
+  }
+  .slider-row {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+  }
+  input[type=range] {
+    flex: 1; -webkit-appearance: none; height: 4px;
+    background: #3a2a08; border-radius: 2px; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #c8a030; cursor: pointer;
+    box-shadow: 0 0 6px #8b6010;
+  }
+  .readout { display: flex; gap: 24px; align-items: center; }
+  .mountain-big {
+    font-size: 56px; font-weight: 900; color: #f0d060;
+    text-shadow: 0 2px 8px #8b6010, 0 0 24px #c8a030;
+    min-width: 70px; text-align: center;
+  }
+  .mountain-info { font-size: 14px; color: #a88020; line-height: 2; }
+  .btns { display: flex; gap: 10px; justify-content: center; }
+  button {
+    padding: 8px 20px; border: 1px solid #c8a030;
+    background: transparent; color: #c8a030;
+    font-family: serif; font-size: 13px; cursor: pointer;
+    border-radius: 4px; letter-spacing: 1px; transition: all 0.2s;
+  }
+  button:hover, button.active { background: #c8a030; color: #0e0a04; }
+  #status { font-size: 12px; letter-spacing: 2px; color: #4a7c59; }
+</style>
+</head>
+<body>
+
+<h1>二十四山罗盘 · 图片版</h1>
+
+<!-- 外框（固定可见区域） -->
+<div id="frame">
+  <div id="top-marker">▼</div>
+
+  <!-- 旋转层：图片放大108%确保外圈不被截 -->
+  <div id="disc-wrap">
+    <img id="disc-img" src="assets/luopan.png" alt="罗盘"/>
+  </div>
+
+  <!-- 中心遮罩（精确覆盖原图指针） -->
+  <div id="center-mask"></div>
+
+  <!-- 固定指针 -->
+  <svg id="needle-svg" viewBox="0 0 360 360" xmlns="http://www.w3.org/2000/svg">
+    <!-- 红针（朝上=北） -->
+    <polygon points="180,112 174.5,180 185.5,180"
+      fill="#cc2200"
+      style="filter:drop-shadow(0 0 6px #ff2200)"/>
+    <!-- 金针（朝下=南） -->
+    <polygon points="180,250 174.5,180 185.5,180"
+      fill="#c8b060"
+      style="filter:drop-shadow(0 0 3px #8b6010)"/>
+    <!-- 铜钉 -->
+    <circle cx="180" cy="180" r="9" fill="#6a4010" stroke="#c8a030" stroke-width="2"/>
+    <circle cx="180" cy="180" r="4" fill="#f0d060"/>
+  </svg>
+</div>
+
+<!-- 控制区 -->
+<div class="controls">
+  <div class="slider-row">
+    <span style="font-size:12px;width:24px">0°</span>
+    <input type="range" id="degSlider" min="0" max="359" value="0">
+    <span style="font-size:12px;width:32px">359°</span>
+  </div>
+
+  <div class="readout">
+    <span class="mountain-big" id="mName">子</span>
+    <div class="mountain-info">
+      <div id="mDeg" style="font-size:18px;color:#f0d060">0°</div>
+      <div id="mSector">北方</div>
+      <div id="mElement">五行：水</div>
+    </div>
+  </div>
+
+  <div class="btns">
+    <button id="btnAuto">▶ 自动旋转</button>
+    <button id="btnReset">↺ 重置</button>
+  </div>
+  <div id="status">● 方向稳定，可以锁定</div>
+</div>
+
+<script>
+const M24 = [
+  {name:"壬",c:345,s:"北",e:"水"},{name:"子",c:0,s:"北",e:"水"},{name:"癸",c:15,s:"北",e:"水"},
+  {name:"丑",c:30,s:"东北",e:"土"},{name:"艮",c:45,s:"东北",e:"土"},{name:"寅",c:60,s:"东北",e:"木"},
+  {name:"甲",c:75,s:"东",e:"木"},{name:"卯",c:90,s:"东",e:"木"},{name:"乙",c:105,s:"东",e:"木"},
+  {name:"辰",c:120,s:"东南",e:"土"},{name:"巽",c:135,s:"东南",e:"木"},{name:"巳",c:150,s:"东南",e:"火"},
+  {name:"丙",c:165,s:"南",e:"火"},{name:"午",c:180,s:"南",e:"火"},{name:"丁",c:195,s:"南",e:"火"},
+  {name:"未",c:210,s:"西南",e:"土"},{name:"坤",c:225,s:"西南",e:"土"},{name:"申",c:240,s:"西南",e:"金"},
+  {name:"庚",c:255,s:"西",e:"金"},{name:"酉",c:270,s:"西",e:"金"},{name:"辛",c:285,s:"西",e:"金"},
+  {name:"戌",c:300,s:"西北",e:"土"},{name:"乾",c:315,s:"西北",e:"金"},{name:"亥",c:330,s:"西北",e:"水"},
+]
+
+function getMountain(deg) {
+  const d = ((deg%360)+360)%360
+  if (d>=352.5||d<7.5) return M24[1]
+  if (d>=337.5) return M24[0]
+  return M24.find(m=>m.name!=='壬'&&m.name!=='子'&&d>=m.c-7.5&&d<m.c+7.5)||M24[1]
+}
+
+const discWrap = document.getElementById('disc-wrap')
+const slider   = document.getElementById('degSlider')
+let deg = 0, timer = null
+
+function update(d) {
+  deg = ((d%360)+360)%360
+  discWrap.style.transform = `rotate(${-deg}deg)`
+  slider.value = Math.round(deg)
+  const m = getMountain(deg)
+  document.getElementById('mName').textContent    = m.name
+  document.getElementById('mDeg').textContent     = `${Math.round(deg)}°`
+  document.getElementById('mSector').textContent  = m.s + '方'
+  document.getElementById('mElement').textContent = '五行：' + m.e
+}
+
+slider.addEventListener('input', e => { stopAuto(); update(+e.target.value) })
+
+const btnAuto = document.getElementById('btnAuto')
+btnAuto.addEventListener('click', function() {
+  if (timer) { stopAuto(); return }
+  this.classList.add('active'); this.textContent = '⏹ 停止旋转'
+  timer = setInterval(() => update(deg + 0.8), 30)
+})
+function stopAuto() {
+  clearInterval(timer); timer = null
+  btnAuto.classList.remove('active'); btnAuto.textContent = '▶ 自动旋转'
+}
+document.getElementById('btnReset').addEventListener('click', () => { stopAuto(); update(0) })
+
+update(0)
+</script>
+</body>
+</html>
