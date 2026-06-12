@@ -193,11 +193,77 @@ export function bearingBetween(from: Coords, to: Coords): number {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
 }
 
-/** 多边形质心（顶点平均，住宅尺度足够） */
+/**
+ * 太极点推算 — 三级策略：
+ *   1. 鞋带公式面积重心（= 传统"纸板平衡法"的数学等价，对顶点疏密不敏感）
+ *   2. 若重心落在轮廓外（深 L 形/U 形凹宅会发生）→ 退回外接矩形中心
+ *   3. 同时返回 method 供报告标注来源
+ *
+ * 顶点平均法已废弃：折线密集的一侧会把中心拉偏，L 形宅误差可达数米。
+ */
+export type TaijiResult = {
+  center: Coords
+  method: "area-centroid" | "bbox-center"
+  concave: boolean        // 重心是否曾落到轮廓外（提示用户宅形特殊）
+}
+
+export function computeTaiji(pts: { lat: number; lon: number }[]): TaijiResult {
+  const area = polygonAreaCentroid(pts)
+  if (area && pointInPolygon(area, pts)) {
+    return { center: area, method: "area-centroid", concave: false }
+  }
+  // 凹宅兜底：外接矩形中心
+  let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity
+  for (const p of pts) {
+    minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat)
+    minLon = Math.min(minLon, p.lon); maxLon = Math.max(maxLon, p.lon)
+  }
+  return {
+    center: { lat: (minLat + maxLat) / 2, lon: (minLon + maxLon) / 2 },
+    method: "bbox-center",
+    concave: true,
+  }
+}
+
+/** 鞋带公式面积重心（平面近似：经度按纬度余弦缩放） */
+export function polygonAreaCentroid(pts: { lat: number; lon: number }[]): Coords | null {
+  if (pts.length < 3) return null
+  const lat0 = pts[0].lat
+  const kx = 111320 * Math.cos(lat0 * Math.PI / 180)   // 米/经度
+  const ky = 110540                                      // 米/纬度
+  const xy = pts.map((p) => ({ x: (p.lon - pts[0].lon) * kx, y: (p.lat - pts[0].lat) * ky }))
+
+  let a2 = 0, cx = 0, cy = 0
+  for (let i = 0; i < xy.length; i++) {
+    const p = xy[i], q = xy[(i + 1) % xy.length]
+    const cross = p.x * q.y - q.x * p.y
+    a2 += cross
+    cx += (p.x + q.x) * cross
+    cy += (p.y + q.y) * cross
+  }
+  if (Math.abs(a2) < 1e-6) return null   // 退化多边形
+  cx /= (3 * a2)
+  cy /= (3 * a2)
+  return { lat: pts[0].lat + cy / ky, lon: pts[0].lon + cx / kx }
+}
+
+/** 射线法点在多边形内判定 */
+export function pointInPolygon(pt: Coords, polygon: { lat: number; lon: number }[]): boolean {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lon, yi = polygon[i].lat
+    const xj = polygon[j].lon, yj = polygon[j].lat
+    if (((yi > pt.lat) !== (yj > pt.lat)) &&
+        (pt.lon < (xj - xi) * (pt.lat - yi) / (yj - yi) + xi)) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+/** @deprecated 顶点平均（有偏），仅保留兼容；新代码请用 computeTaiji */
 export function polygonCentroid(pts: { lat: number; lon: number }[]): Coords {
-  let lat = 0, lon = 0
-  for (const p of pts) { lat += p.lat; lon += p.lon }
-  return { lat: lat / pts.length, lon: lon / pts.length }
+  return computeTaiji(pts).center
 }
 
 /**

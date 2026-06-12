@@ -80,13 +80,45 @@ function setBanner(text, ok) {
   b.className = ok ? 'banner ok' : 'banner'
 }
 
+// 鞋带公式面积重心（与 RN 侧 computeTaiji 一致 = 传统纸板平衡法）
+function areaCentroid(pts) {
+  const lat0 = pts[0][0]
+  const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540
+  const xy = pts.map(p => ({ x: (p[1] - pts[0][1]) * kx, y: (p[0] - pts[0][0]) * ky }))
+  let a2 = 0, cx = 0, cy = 0
+  for (let i = 0; i < xy.length; i++) {
+    const p = xy[i], q = xy[(i + 1) % xy.length]
+    const cross = p.x * q.y - q.x * p.y
+    a2 += cross; cx += (p.x + q.x) * cross; cy += (p.y + q.y) * cross
+  }
+  if (Math.abs(a2) < 1e-6) return null
+  return [pts[0][0] + (cy / (3 * a2)) / ky, pts[0][1] + (cx / (3 * a2)) / kx]
+}
+function pointInPoly(pt, poly) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][1], yi = poly[i][0], xj = poly[j][1], yj = poly[j][0]
+    if (((yi > pt[0]) !== (yj > pt[0])) && (pt[1] < (xj - xi) * (pt[0] - yi) / (yj - yi) + xi)) inside = !inside
+  }
+  return inside
+}
+
 function showPolygon(pts) {
   if (polyLayer) map.removeLayer(polyLayer)
   polyLayer = L.polygon(pts, { color: '#f0d060', weight: 3, fillColor: '#f0d060', fillOpacity: 0.25 }).addTo(map)
-  const c = polyLayer.getBounds().getCenter()
+  // 太极点：面积重心，凹宅落到轮廓外时退回外接矩形中心
+  let c = areaCentroid(pts)
+  let concave = false
+  if (!c || !pointInPoly(c, pts)) {
+    const b = polyLayer.getBounds()
+    c = [(b.getNorth() + b.getSouth()) / 2, (b.getEast() + b.getWest()) / 2]
+    concave = true
+  }
   L.circleMarker(c, { radius: 6, color: '#cc2200', fillColor: '#cc2200', fillOpacity: 1 }).addTo(map)
   post({ polygon: pts.map(p => ({ lat: p[0], lng: p[1] })), confirmed: true })
-  setBanner('✓ 轮廓已确认（红点=宅中心/太极点）。不准可点右下角重描', true)
+  setBanner(concave
+    ? '✓ 轮廓已确认。⚠ 宅形较特殊（L/U形），太极点用外接矩形中心估算'
+    : '✓ 轮廓已确认（红点=宅中心/太极点，纸板平衡法）。不准可点右下角重描', true)
 }
 
 function resetDraw() {

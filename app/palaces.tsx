@@ -9,7 +9,14 @@ import { ScrollView, View, Text, Pressable, StyleSheet } from "react-native"
 import { useAppStore } from "@/store/useAppStore"
 import { PALACE_ORDER_GRID, PALACE_INFO, ROOM_INFO, ALL_ROOMS, type RoomType } from "@/lib/fengshui/palaces"
 import { computeFlyingStarChart, yearToPeriod } from "@/lib/fengshui/flying-stars"
+import { CompassCheck } from "@/components/CompassCheck"
 import type { PalaceId } from "@/types/fengshui"
+
+/** 方位角 → 宫位（8 个 45° 扇区，N 居 337.5°-22.5°） */
+function bearingToPalace(deg: number): PalaceId {
+  const dirs: PalaceId[] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+  return dirs[Math.round(((deg % 360) + 360) % 360 / 45) % 8]
+}
 
 // 24山坐山 → 8方位（八宅游年表用）
 const MOUNTAIN_TO_DIR8: Record<string, string> = {
@@ -37,6 +44,8 @@ export default function PalacesScreen() {
   const placeRoom  = useAppStore((s) => s.placeRoom)
 
   const [activeRoom, setActiveRoom] = useState<RoomType | null>("front-door")
+  const [compassOpen, setCompassOpen] = useState(false)
+  const [lastCompassResult, setLastCompassResult] = useState<string | null>(null)
 
   const placements = assessment?.placements ?? []
   const orientation = assessment?.orientation
@@ -88,6 +97,17 @@ export default function PalacesScreen() {
     placeRoom(activeRoom, next.length > 0 ? next : null)
   }
 
+  // 罗盘定宫：站在太极点，手机指向房间 → bearing → 宫位（设为主宫，已有跨宫保留）
+  const onCompassPlace = (deg: number) => {
+    if (!activeRoom) return
+    const palace = bearingToPalace(deg)
+    const cur = palacesOfRoom(activeRoom).filter((p) => p !== palace)
+    placeRoom(activeRoom, [palace, ...cur])   // 罗盘测得的为主宫
+    setLastCompassResult(
+      `${ROOM_INFO[activeRoom].label} → ${Math.round(deg)}° → ${PALACE_INFO[palace].label}宫`,
+    )
+  }
+
   const placedCount = placements.length
   const keyDone = ["front-door", "master-bedroom"].every((r) => placements.some((p) => p.room === r))
 
@@ -95,10 +115,24 @@ export default function PalacesScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>第 4 步 · 九宫内局</Text>
       <Text style={styles.copy}>
-        想象俯视你的房子（上=北），九宫格盖在平面图上。
-        <Text style={styles.bold}>先点下方房间，再点它所在的宫位格。</Text>
-        大门和主卧最重要，必放。
+        两种放置方式：<Text style={styles.bold}>① 看图放</Text>——点房间再点宫位格（可点多格跨宫）；
+        <Text style={styles.bold}>② 罗盘定宫（推荐）</Text>——人站到房子大致中心，
+        选房间后点下方按钮，手机平举指向那个房间，锁定自动入宫。
       </Text>
+
+      {/* 罗盘定宫入口 */}
+      <Pressable
+        onPress={() => setCompassOpen(true)}
+        disabled={!activeRoom}
+        style={[styles.compassBtn, !activeRoom && styles.btnDisabled]}
+      >
+        <Text style={styles.compassBtnText}>
+          🧭 用罗盘定「{activeRoom ? ROOM_INFO[activeRoom].label : "请先选房间"}」的宫位
+        </Text>
+      </Pressable>
+      {lastCompassResult && (
+        <Text style={styles.compassResult}>✓ {lastCompassResult}</Text>
+      )}
 
       {/* ── 九宫格 ── */}
       <View style={styles.grid}>
@@ -179,6 +213,15 @@ export default function PalacesScreen() {
           {keyDone ? "下一步：房间细节 →" : "请至少放置大门和主卧"}
         </Text>
       </Pressable>
+
+      <CompassCheck
+        visible={compassOpen}
+        title={`定「${activeRoom ? ROOM_INFO[activeRoom].label : ""}」的宫位`}
+        hint={"人站到房子的大致中心位置（太极点），手机水平举起，屏幕顶端指向" +
+          `「${activeRoom ? ROOM_INFO[activeRoom].label : "该房间"}」的方向，待读数稳定后锁定。`}
+        onConfirm={onCompassPlace}
+        onClose={() => setCompassOpen(false)}
+      />
     </ScrollView>
   )
 }
@@ -226,4 +269,12 @@ const styles = StyleSheet.create({
   nextBtn:     { backgroundColor: "#2a2118", paddingVertical: 16, borderRadius: 16, alignItems: "center" },
   btnDisabled: { backgroundColor: "#bfad9c" },
   nextBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+
+  compassBtn: {
+    backgroundColor: "#6b3e1a", paddingVertical: 14,
+    borderRadius: 14, alignItems: "center",
+    borderWidth: 1.5, borderColor: "#c8a030",
+  },
+  compassBtnText: { color: "#f0d060", fontWeight: "800", fontSize: 14 },
+  compassResult:  { fontSize: 13, color: "#2d6a3f", fontWeight: "700", textAlign: "center" },
 })

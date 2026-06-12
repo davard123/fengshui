@@ -76,3 +76,60 @@ assert.equal(bearingToRelative(270, 180), "right")  // 西在右手 → 白虎
 console.log("✓ 四灵换算: 朝南宅 东=青龙 西=白虎 北=玄武 南=朱雀")
 
 console.log("\n════ 规则验证完成 ════")
+
+// ── 4. 太极点（鞋带面积重心 + 凹宅兜底）──────────────────────────────────
+function areaCentroid(pts) {
+  const lat0 = pts[0].lat
+  const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540
+  const xy = pts.map(p => ({ x: (p.lon - pts[0].lon) * kx, y: (p.lat - pts[0].lat) * ky }))
+  let a2 = 0, cx = 0, cy = 0
+  for (let i = 0; i < xy.length; i++) {
+    const p = xy[i], q = xy[(i + 1) % xy.length]
+    const cross = p.x * q.y - q.x * p.y
+    a2 += cross; cx += (p.x + q.x) * cross; cy += (p.y + q.y) * cross
+  }
+  if (Math.abs(a2) < 1e-6) return null
+  return { lat: pts[0].lat + (cy / (3 * a2)) / ky, lon: pts[0].lon + (cx / (3 * a2)) / kx }
+}
+
+// 测试1：矩形 — 重心应在几何中心
+{
+  const rect = [
+    { lat: 33.0000, lon: -117.0000 }, { lat: 33.0000, lon: -116.9990 },
+    { lat: 33.0002, lon: -116.9990 }, { lat: 33.0002, lon: -117.0000 },
+  ]
+  const c = areaCentroid(rect)
+  assert.ok(Math.abs(c.lat - 33.0001) < 1e-6, "矩形重心 lat")
+  assert.ok(Math.abs(c.lon - (-116.9995)) < 1e-6, "矩形重心 lon")
+  console.log("✓ 太极点-矩形: 重心=几何中心")
+}
+
+// 测试2：顶点密度偏置 — 一侧加密顶点不应拉偏重心（旧顶点平均法会偏）
+{
+  const rectDense = [
+    { lat: 33.0000, lon: -117.0000 },
+    { lat: 33.0000, lon: -116.99975 }, { lat: 33.0000, lon: -116.99950 },
+    { lat: 33.0000, lon: -116.99925 }, { lat: 33.0000, lon: -116.9990 },  // 南边 5 个点
+    { lat: 33.0002, lon: -116.9990 }, { lat: 33.0002, lon: -117.0000 },   // 北边 2 个点
+  ]
+  const c = areaCentroid(rectDense)
+  assert.ok(Math.abs(c.lat - 33.0001) < 1e-7, "加密顶点不应拉偏面积重心")
+  // 旧顶点平均法: avgLat = (33.0000*5 + 33.0002*2)/7 = 33.0000571 ≠ 33.0001 ← 偏了
+  console.log("✓ 太极点-密度偏置: 面积重心不受顶点疏密影响（旧平均法偏差 0.43e-4 度≈5米）")
+}
+
+// 测试3：L 形 — 重心在实体部分内
+{
+  // L 形：大矩形去掉右上角
+  const lShape = [
+    { lat: 33.0000, lon: -117.0000 }, { lat: 33.0000, lon: -116.9990 },
+    { lat: 33.0001, lon: -116.9990 }, { lat: 33.0001, lon: -116.9995 },
+    { lat: 33.0002, lon: -116.9995 }, { lat: 33.0002, lon: -117.0000 },
+  ]
+  const c = areaCentroid(lShape)
+  // L 形重心应偏向"实"的一侧（西南），lat < 33.0001, lon < -116.9994
+  assert.ok(c.lat < 33.0001 && c.lon < -116.9994, "L形重心应偏向实体侧")
+  console.log("✓ 太极点-L形: 重心偏向实体侧 (lat=" + c.lat.toFixed(6) + ")")
+}
+
+console.log("\n════ 太极点验证完成 ════")
