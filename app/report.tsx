@@ -4,12 +4,15 @@
  */
 import { router } from "expo-router"
 import { useMemo, useState } from "react"
-import { ScrollView, View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native"
+import { ScrollView, View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from "react-native"
+import * as Print from "expo-print"
 import { useAppStore } from "@/store/useAppStore"
 import { generateReportV3, RATING_COLOR_V3, RATING_BG_V3 } from "@/lib/fengshui/report-v3"
 import { PATTERN_MEANING } from "@/lib/fengshui/flying-stars"
 import { PALACE_ORDER_GRID, PALACE_INFO } from "@/lib/fengshui/palaces"
-import { buildV3SynthesisPrompt, V3_SYSTEM_PROMPT } from "@/lib/fengshui/ai-prompts-v3"
+import { buildV3SynthesisPrompt, V3_SYSTEM_PROMPT, buildV3DeepPrompt, V3_DEEP_SYSTEM_PROMPT } from "@/lib/fengshui/ai-prompts-v3"
+import { buildPrintHTML } from "@/lib/fengshui/print-report"
+import { purchaseDeepReport, DEEP_REPORT_PRICE, PURCHASE_TEST_MODE } from "@/lib/purchases"
 import { analyzeWithAI } from "@/lib/ai-client"
 import { FocusAreaPicker } from "@/components/FocusAreaPicker"
 import type { FocusArea } from "@/types/fengshui"
@@ -24,6 +27,7 @@ type AnyFinding = {
 export default function ReportScreen() {
   const assessment    = useAppStore((s) => s.assessment)
   const setReportText = useAppStore((s) => s.setReportText)
+  const setAiUnlocked = useAppStore((s) => s.setAiUnlocked)
   const saveToHistory = useAppStore((s) => s.saveToHistory)
 
   const [focusAreas, setFocusAreas] = useState<FocusArea[]>([])
@@ -45,10 +49,35 @@ export default function ReportScreen() {
 
   const runAI = async () => {
     setAiLoading(true); setAiError(null)
-    const result = await analyzeWithAI(V3_SYSTEM_PROMPT, buildV3SynthesisPrompt(assessment, report))
+    // 付费深度版：更长篇幅 + 七节结构
+    const result = await analyzeWithAI(
+      V3_DEEP_SYSTEM_PROMPT,
+      buildV3DeepPrompt(assessment, report),
+      1800,
+    )
     if (result.ok) setReportText(result.text)
     else setAiError(result.error)
     setAiLoading(false)
+  }
+
+  const handleBuy = async () => {
+    const res = await purchaseDeepReport()
+    if (res.ok) {
+      setAiUnlocked(true)
+      void runAI()   // 购买成功立即生成
+    }
+  }
+
+  const handlePrint = async () => {
+    const html = buildPrintHTML(assessment, report)
+    if (Platform.OS === "web") {
+      const w = typeof window !== "undefined" ? window.open("", "_blank") : null
+      if (w) { w.document.write(html); w.document.close() }
+      return
+    }
+    try {
+      await Print.printAsync({ html })   // iOS: 系统打印面板，可存 PDF
+    } catch {}
   }
 
   // 按关注运势过滤 findings
@@ -170,32 +199,67 @@ export default function ReportScreen() {
         </View>
       )}
 
-      {/* ── AI 综合（可选）── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>🤖 AI 深度综合（可选）</Text>
-        {aiLoading && (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color="#8d6b4c" />
-            <Text style={styles.loadingText}>分析中…</Text>
+      {/* ── 深度报告（付费 $1.99）── */}
+      {!assessment.aiUnlocked ? (
+        <View style={[styles.card, styles.paywallCard]}>
+          <Text style={styles.paywallTitle}>📜 解锁深度风水报告</Text>
+          <Text style={styles.paywallPrice}>{DEEP_REPORT_PRICE} <Text style={styles.paywallPriceSub}>· 本套房产一次性</Text></Text>
+          <View style={styles.paywallFeatures}>
+            {[
+              "AI 顾问 800-1000 字七节深度分析",
+              "逐房间布置建议（颜色/材质/摆放）",
+              "五行调理方案 + 居住注意事项",
+              "改善行动按「立刻/一月内/装修时」排期",
+              "含飞星盘/房间布局/外局方位三张图",
+              "可打印成 PDF 存档分享",
+            ].map((f) => (
+              <Text key={f} style={styles.paywallFeature}>✓ {f}</Text>
+            ))}
           </View>
-        )}
-        {aiError && (
-          <>
-            <Text style={styles.errorText}>{aiError}</Text>
-            <Pressable onPress={runAI} style={styles.aiBtn}>
-              <Text style={styles.aiBtnText}>重试</Text>
-            </Pressable>
-          </>
-        )}
-        {!aiLoading && !aiError && assessment.reportText && (
-          <Text style={styles.aiText}>{assessment.reportText}</Text>
-        )}
-        {!aiLoading && !aiError && !assessment.reportText && (
-          <Pressable onPress={runAI} style={styles.aiBtn}>
-            <Text style={styles.aiBtnText}>生成 AI 综合分析</Text>
+          <Pressable onPress={handleBuy} style={styles.buyBtn}>
+            <Text style={styles.buyBtnText}>解锁深度报告 {DEEP_REPORT_PRICE}</Text>
           </Pressable>
-        )}
-      </View>
+          {PURCHASE_TEST_MODE && (
+            <Text style={styles.testModeNote}>测试模式：正式版将通过 App Store 内购</Text>
+          )}
+        </View>
+      ) : (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>📜 深度风水报告 <Text style={styles.unlockedTag}>已解锁</Text></Text>
+          {aiLoading && (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color="#8d6b4c" />
+              <Text style={styles.loadingText}>顾问撰写中（约 30 秒）…</Text>
+            </View>
+          )}
+          {aiError && (
+            <>
+              <Text style={styles.errorText}>{aiError}</Text>
+              <Pressable onPress={runAI} style={styles.aiBtn}>
+                <Text style={styles.aiBtnText}>重试（已购买，不再收费）</Text>
+              </Pressable>
+            </>
+          )}
+          {!aiLoading && !aiError && assessment.reportText && (
+            <>
+              <Text style={styles.aiText}>{assessment.reportText}</Text>
+              <Pressable onPress={runAI} style={styles.regenBtn}>
+                <Text style={styles.regenBtnText}>↻ 重新生成</Text>
+              </Pressable>
+            </>
+          )}
+          {!aiLoading && !aiError && !assessment.reportText && (
+            <Pressable onPress={runAI} style={styles.aiBtn}>
+              <Text style={styles.aiBtnText}>生成深度报告</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      {/* ── 打印 / 导出 PDF ── */}
+      <Pressable onPress={handlePrint} style={styles.printBtn}>
+        <Text style={styles.printBtnText}>🖨 打印 / 导出 PDF（含三张配图）</Text>
+      </Pressable>
 
       <Pressable
         onPress={() => { saveToHistory(); router.push("/history") }}
@@ -268,4 +332,29 @@ const styles = StyleSheet.create({
 
   saveBtn:     { backgroundColor: "#2a2118", paddingVertical: 16, borderRadius: 16, alignItems: "center" },
   saveBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+
+  // 付费墙
+  paywallCard:  { borderWidth: 2, borderColor: "#c8a030", backgroundColor: "#fffcf4" },
+  paywallTitle: { fontSize: 18, fontWeight: "900", color: "#6b3e1a", textAlign: "center" },
+  paywallPrice: { fontSize: 30, fontWeight: "900", color: "#2a2118", textAlign: "center" },
+  paywallPriceSub: { fontSize: 13, fontWeight: "600", color: "#8d6b4c" },
+  paywallFeatures: { gap: 5, marginVertical: 4 },
+  paywallFeature:  { fontSize: 13, color: "#46392c", lineHeight: 20 },
+  buyBtn: {
+    backgroundColor: "#c8a030", paddingVertical: 15,
+    borderRadius: 14, alignItems: "center",
+  },
+  buyBtnText:   { color: "#2a1300", fontWeight: "900", fontSize: 16 },
+  testModeNote: { fontSize: 11, color: "#bfad9c", textAlign: "center" },
+  unlockedTag:  { fontSize: 11, color: "#2d6a3f", fontWeight: "700" },
+  regenBtn:     { alignSelf: "center", paddingVertical: 8 },
+  regenBtnText: { fontSize: 13, color: "#8d6b4c", textDecorationLine: "underline" },
+
+  // 打印
+  printBtn: {
+    backgroundColor: "#6b3e1a", paddingVertical: 15,
+    borderRadius: 16, alignItems: "center",
+    borderWidth: 1.5, borderColor: "#c8a030",
+  },
+  printBtnText: { color: "#f0d060", fontWeight: "800", fontSize: 15 },
 })

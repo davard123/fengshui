@@ -221,7 +221,8 @@ export type AssessmentV3 = {
   placements: RoomPlacementV3[]
   flyingStars?: FlyingStarChartData
   checklists: RoomChecklistV3[]
-  reportText?: string           // AI 综合（可选）
+  reportText?: string           // AI 深度报告（付费解锁后生成）
+  aiUnlocked?: boolean          // 深度报告是否已购买解锁（$1.99/评估）
   createdAt: string
   updatedAt: string
 }

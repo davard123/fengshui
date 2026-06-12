@@ -44,6 +44,7 @@ type AppState = {
   placeRoom: (room: string, palaces: RoomPlacementV3["primaryPalace"][] | null) => void
   setChecklist: (cl: RoomChecklistV3) => void
   setReportText: (text: string) => void
+  setAiUnlocked: (unlocked: boolean) => void
   saveToHistory: () => void
   resetAssessment: () => void
 }
@@ -135,6 +136,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setReportText: (text) =>
     set((s) => s.assessment
       ? { assessment: touch({ ...s.assessment, reportText: text }) }
+      : {}),
+
+  setAiUnlocked: (unlocked) =>
+    set((s) => s.assessment
+      ? { assessment: touch({ ...s.assessment, aiUnlocked: unlocked }) }
       : {}),
 
   saveToHistory: () => {
