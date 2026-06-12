@@ -3,14 +3,12 @@ import { useEffect } from "react"
 import { readStorageValue, writeStorageValue } from "@/lib/storage"
 import { useAppStore } from "@/store/useAppStore"
 
-const STORAGE_KEY = "fengshui-app-state-v2"
+const STORAGE_KEY = "fengshui-app-state-v3"
 
 type PersistedState = {
   hasAcceptedDisclaimer?: boolean
   profile?: ReturnType<typeof useAppStore.getState>["profile"]
-  address?: string
-  standingPoints?: ReturnType<typeof useAppStore.getState>["standingPoints"]
-  currentFullAssessment?: ReturnType<typeof useAppStore.getState>["currentFullAssessment"]
+  assessment?: ReturnType<typeof useAppStore.getState>["assessment"]
   history?: ReturnType<typeof useAppStore.getState>["history"]
 }
 
@@ -24,11 +22,9 @@ export default function RootLayout() {
       if (snapshot) {
         useAppStore.setState({
           hasAcceptedDisclaimer: snapshot.hasAcceptedDisclaimer ?? false,
-          profile:               snapshot.profile ?? null,
-          address:               snapshot.address ?? "",
-          standingPoints:        snapshot.standingPoints ?? [],
-          currentFullAssessment: snapshot.currentFullAssessment ?? null,
-          history:               snapshot.history ?? [],
+          profile:    snapshot.profile ?? null,
+          assessment: snapshot.assessment ?? null,
+          history:    snapshot.history ?? [],
         })
       }
       useAppStore.setState({ hydrated: true })
@@ -40,11 +36,9 @@ export default function RootLayout() {
       if (!state.hydrated) return
       void writeStorageValue<PersistedState>(STORAGE_KEY, {
         hasAcceptedDisclaimer: state.hasAcceptedDisclaimer,
-        profile:               state.profile,
-        address:               state.address,
-        standingPoints:        state.standingPoints,
-        currentFullAssessment: state.currentFullAssessment,
-        history:               state.history,
+        profile:    state.profile,
+        assessment: state.assessment,
+        history:    state.history,
       })
     })
 
@@ -56,16 +50,16 @@ export default function RootLayout() {
 
   return (
     <Stack screenOptions={{ headerTitleAlign: "center" }}>
-      <Stack.Screen name="index"          options={{ title: "风水评估", headerShown: false }} />
-      <Stack.Screen name="address"        options={{ title: "房产地址" }} />
-      <Stack.Screen name="setup"          options={{ title: "个人信息" }} />
-      <Stack.Screen name="compass"        options={{ title: "罗盘采集" }} />
-      <Stack.Screen name="point-select"   options={{ title: "选择站点" }} />
-      <Stack.Screen name="direction-map"  options={{ title: "方位标记" }} />
-      <Stack.Screen name="point-analysis" options={{ title: "站点分析" }} />
-      <Stack.Screen name="synthesis"      options={{ title: "综合报告" }} />
-      <Stack.Screen name="history"        options={{ title: "历史记录" }} />
-      <Stack.Screen name="settings"       options={{ title: "设置" }} />
+      <Stack.Screen name="index"       options={{ title: "风水评估", headerShown: false }} />
+      <Stack.Screen name="address"     options={{ title: "定位房屋" }} />
+      <Stack.Screen name="orientation" options={{ title: "定向" }} />
+      <Stack.Screen name="exterior"    options={{ title: "外局" }} />
+      <Stack.Screen name="palaces"     options={{ title: "九宫内局" }} />
+      <Stack.Screen name="room-detail" options={{ title: "房间细节" }} />
+      <Stack.Screen name="report"      options={{ title: "综合报告" }} />
+      <Stack.Screen name="setup"       options={{ title: "住户信息" }} />
+      <Stack.Screen name="history"     options={{ title: "历史记录" }} />
+      <Stack.Screen name="settings"    options={{ title: "设置" }} />
     </Stack>
   )
 }

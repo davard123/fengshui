@@ -241,3 +241,127 @@ export function formatDirectionFeatures(features: SurroundingFeature[]): string 
   if (!features.length) return "（无明显地物）"
   return features.map((f) => `${f.element}${f.distance}m`).join("、")
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v3 — 以宅中心为原点的外局地物查询（保留坐标/方位/距离）
+// ═══════════════════════════════════════════════════════════════════════════
+import type { ExternalFeatureV3, GeoPoint } from "@/types/fengshui"
+import { distanceToRing, bearingToRelative, severityBaseOf } from "@/lib/fengshui/palaces"
+
+export type RawExternalFeature = {
+  id: string
+  kind: string
+  lat: number
+  lon: number
+  bearing: number
+  distance: number
+}
+
+/**
+ * 查询宅中心周边地物（半径 1km，山水 2km），返回原始列表。
+ * 每类地物每方向只保留最近的一个，避免淹没 UI。
+ */
+export async function queryExternalFeaturesV3(center: GeoPoint): Promise<RawExternalFeature[]> {
+  const a = `around:1000,${center.lat},${center.lon}`
+  const big = `around:2000,${center.lat},${center.lon}`
+  const query = `[out:json][timeout:20];
+(
+  way[highway~"motorway|trunk|primary|secondary|residential|tertiary"](${a});
+  way[natural=water](${a});
+  relation[natural=water](${a});
+  way[waterway~"river|stream|canal"](${a});
+  node[natural~"peak|hill"](${big});
+  way[leisure~"park|garden"](${a});
+  way[landuse~"cemetery"](${a});
+  node[amenity~"fuel|grave_yard"](${a});
+  way[power=line](${a});
+  way[building](around:150,${center.lat},${center.lon});
+);
+out center;`
+
+  const body = `data=${encodeURIComponent(query)}`
+  const headers = { "Content-Type": "application/x-www-form-urlencoded" }
+  let res: Response | null = null
+  for (const url of OVERPASS_ENDPOINTS) {
+    try {
+      const r = await fetch(url, { method: "POST", headers, body })
+      if (r.ok) { res = r; break }
+    } catch {}
+  }
+  if (!res) return []
+
+  const data = await res.json() as { elements: {
+    type: string; id: number; tags?: Record<string, string>
+    center?: { lat: number; lon: number }; lat?: number; lon?: number
+  }[] }
+
+  const out: RawExternalFeature[] = []
+  for (const el of data.elements || []) {
+    const tags = el.tags ?? {}
+    const lat = el.center?.lat ?? el.lat
+    const lon = el.center?.lon ?? el.lon
+    if (lat == null || lon == null) continue
+    const kind = osmTagsToKindV3(tags)
+    if (!kind) continue
+    const dLat = (lat - center.lat) * Math.PI / 180
+    const dLon = (lon - center.lon) * Math.PI / 180
+    const la = center.lat * Math.PI / 180
+    const dist = 6371000 * Math.sqrt(dLat ** 2 + (dLon * Math.cos(la)) ** 2)
+    const y = Math.sin(dLon) * Math.cos(lat * Math.PI / 180)
+    const x = Math.cos(la) * Math.sin(lat * Math.PI / 180) -
+              Math.sin(la) * Math.cos(lat * Math.PI / 180) * Math.cos(dLon)
+    const brg = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
+    out.push({ id: `osm-${el.type}-${el.id}`, kind, lat, lon, bearing: brg, distance: Math.round(dist) })
+  }
+
+  // 每 (kind × 8方向扇区) 只留最近一个
+  const seen = new Map<string, RawExternalFeature>()
+  for (const f of out.sort((p, q) => p.distance - q.distance)) {
+    const sector = Math.round(f.bearing / 45) % 8
+    const key = `${f.kind}|${sector}`
+    if (!seen.has(key)) seen.set(key, f)
+  }
+  return [...seen.values()]
+}
+
+function osmTagsToKindV3(tags: Record<string, string>): string | null {
+  const hw = tags.highway
+  if (hw) {
+    if (["motorway", "motorway_link", "trunk", "trunk_link"].includes(hw)) return "高速公路"
+    if (["primary", "secondary"].includes(hw)) return "主干道"
+    if (["residential", "tertiary"].includes(hw)) return "小路街道"
+    return null
+  }
+  if (tags.natural === "water" || tags.waterway === "river" || tags.waterway === "canal") return "水(湖河海)"
+  if (tags.waterway === "stream") return "小溪水渠"
+  if (tags.natural === "peak" || tags.natural === "hill") return "山/高地"
+  if (tags.leisure === "park" || tags.leisure === "garden") return "空地/开阔"
+  if (tags.landuse === "cemetery" || tags.amenity === "grave_yard") return "墓地"
+  if (tags.amenity === "fuel") return "加油站"
+  if (tags.power === "line") return "高压线"
+  if (tags.building) {
+    const lv = parseInt(tags["building:levels"] ?? "1", 10)
+    return lv >= 7 ? "高楼" : "低矮建筑"
+  }
+  return null
+}
+
+/** 原始地物 → ExternalFeatureV3（自动项默认未确认） */
+export function rawToExternalFeature(
+  raw: RawExternalFeature,
+  facingDegree: number,
+): ExternalFeatureV3 | null {
+  const ring = distanceToRing(raw.distance, raw.kind)
+  if (!ring) return null
+  return {
+    id: raw.id,
+    kind: raw.kind,
+    bearingFromCenter: raw.bearing,
+    distance: raw.distance,
+    ring,
+    relative: bearingToRelative(raw.bearing, facingDegree),
+    source: "auto",
+    confirmed: false,
+    severityBase: severityBaseOf(raw.kind),
+  }
+}

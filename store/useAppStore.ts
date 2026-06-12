@@ -2,138 +2,148 @@ import { create } from "zustand"
 import type {
   CompassState,
   UserProfile,
-  StandingPoint,
-  FullAssessment,
-  HistoryItem,
-  LegacyAssessment,
+  AssessmentV3,
+  HouseFootprintData,
+  HouseOrientation,
+  ExternalFeatureV3,
+  RoomPlacementV3,
+  RoomChecklistV3,
+  HistoryItemV3,
 } from "@/types/fengshui"
 
 type AppState = {
-  // ── 生命周期 ──────────────────────────────────────────────────
+  // ── 生命周期 ────────────────────────────────────────────────
   hydrated: boolean
   hasAcceptedDisclaimer: boolean
 
-  // ── 用户档案 ──────────────────────────────────────────────────
+  // ── 用户档案（住户命卦，跟随评估）────────────────────────────
   profile: UserProfile | null
 
-  // ── 当前评估流程 ───────────────────────────────────────────────
-  address: string
-  compass: CompassState            // 当前站点的罗盘状态
+  // ── 罗盘（组件级共享状态：定向验证/单项测量用）───────────────
+  compass: CompassState
 
-  // ── 多站点数据（v2 核心）──────────────────────────────────────
-  standingPoints: StandingPoint[]                 // 已完成的站点
-  currentPointDraft: Partial<StandingPoint> | null // 正在编辑的站点草稿
+  // ── 当前评估 v3 ──────────────────────────────────────────────
+  assessment: AssessmentV3 | null
 
-  // ── 完成的完整评估 ─────────────────────────────────────────────
-  currentFullAssessment: FullAssessment | null
+  // ── 历史 ─────────────────────────────────────────────────────
+  history: HistoryItemV3[]
 
-  // ── 历史记录（兼容新旧格式）──────────────────────────────────
-  history: HistoryItem[]
-
-  // ── Actions ───────────────────────────────────────────────────
+  // ── Actions ─────────────────────────────────────────────────
   acceptDisclaimer: () => void
   setProfile: (profile: UserProfile) => void
-  setAddress: (address: string) => void
   setCompass: (next: Partial<CompassState>) => void
 
-  // 站点管理
-  startNewPoint: (draft: Partial<StandingPoint>) => void
-  updateCurrentPointDraft: (patch: Partial<StandingPoint>) => void
-  commitCurrentPoint: (point: StandingPoint) => void
-  updateStandingPoint: (id: string, patch: Partial<StandingPoint>) => void
-  removeStandingPoint: (id: string) => void
-  clearStandingPoints: () => void
-
-  // 完整评估
-  setCurrentFullAssessment: (a: FullAssessment) => void
-  saveFullAssessmentToHistory: () => void
-
-  // 旧格式兼容（迁移历史用）
-  addLegacyToHistory: (a: LegacyAssessment) => void
-
-  // 重置
-  resetAssessmentFlow: () => void
+  startAssessment: (address: string) => void
+  setFootprint: (fp: HouseFootprintData) => void
+  setOrientation: (o: HouseOrientation) => void
+  setBuiltYear: (year: number | undefined) => void
+  setExternalFeatures: (features: ExternalFeatureV3[]) => void
+  upsertExternalFeature: (f: ExternalFeatureV3) => void
+  removeExternalFeature: (id: string) => void
+  /** palaces=null 移除；palaces[0] 为 primaryPalace，可多宫（房间横跨） */
+  placeRoom: (room: string, palaces: RoomPlacementV3["primaryPalace"][] | null) => void
+  setChecklist: (cl: RoomChecklistV3) => void
+  setReportText: (text: string) => void
+  saveToHistory: () => void
+  resetAssessment: () => void
 }
 
 const INITIAL_COMPASS: CompassState = { degree: 0, direction: "N", locked: false }
+
+function touch(a: AssessmentV3): AssessmentV3 {
+  return { ...a, updatedAt: new Date().toISOString() }
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   hydrated: false,
   hasAcceptedDisclaimer: false,
   profile: null,
-  address: "",
   compass: INITIAL_COMPASS,
-  standingPoints: [],
-  currentPointDraft: null,
-  currentFullAssessment: null,
+  assessment: null,
   history: [],
 
   acceptDisclaimer: () => set({ hasAcceptedDisclaimer: true }),
-  setProfile: (profile) => set({ profile }),
-  setAddress: (address) => set({ address }),
-  setCompass: (next) =>
-    set((state) => ({ compass: { ...state.compass, ...next } })),
+  setProfile: (profile) =>
+    set((s) => ({
+      profile,
+      assessment: s.assessment ? touch({ ...s.assessment, profile }) : s.assessment,
+    })),
+  setCompass: (next) => set((s) => ({ compass: { ...s.compass, ...next } })),
 
-  // 开始新站点草稿（从站点选择页调用）
-  startNewPoint: (draft) =>
+  startAssessment: (address) =>
     set({
-      currentPointDraft: draft,
-      compass: INITIAL_COMPASS,  // 重置罗盘，等用户在新位置重新锁定
+      assessment: {
+        id: `v3-${Date.now()}`,
+        address,
+        external: [],
+        placements: [],
+        checklists: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
     }),
 
-  // 更新草稿（方向标记时调用）
-  updateCurrentPointDraft: (patch) =>
-    set((state) => ({
-      currentPointDraft: state.currentPointDraft
-        ? { ...state.currentPointDraft, ...patch }
-        : patch,
-    })),
+  setFootprint: (fp) =>
+    set((s) => s.assessment
+      ? { assessment: touch({ ...s.assessment, footprint: fp }) }
+      : {}),
 
-  // 提交草稿为完成站点
-  commitCurrentPoint: (point) =>
-    set((state) => ({
-      standingPoints: [...state.standingPoints, point],
-      currentPointDraft: null,
-      compass: INITIAL_COMPASS,
-    })),
+  setOrientation: (o) =>
+    set((s) => s.assessment
+      ? { assessment: touch({ ...s.assessment, orientation: o }) }
+      : {}),
 
-  // 更新已有站点（AI分析完成后回写）
-  updateStandingPoint: (id, patch) =>
-    set((state) => ({
-      standingPoints: state.standingPoints.map((p) =>
-        p.id === id ? { ...p, ...patch } : p
-      ),
-    })),
+  setBuiltYear: (year) =>
+    set((s) => s.assessment
+      ? { assessment: touch({ ...s.assessment, builtYear: year }) }
+      : {}),
 
-  removeStandingPoint: (id) =>
-    set((state) => ({
-      standingPoints: state.standingPoints.filter((p) => p.id !== id),
-    })),
+  setExternalFeatures: (features) =>
+    set((s) => s.assessment
+      ? { assessment: touch({ ...s.assessment, external: features }) }
+      : {}),
 
-  clearStandingPoints: () => set({ standingPoints: [] }),
-
-  setCurrentFullAssessment: (a) => set({ currentFullAssessment: a }),
-
-  saveFullAssessmentToHistory: () => {
-    const { currentFullAssessment, history } = get()
-    if (!currentFullAssessment) return
-    const item: HistoryItem = { format: "v2", data: currentFullAssessment }
-    set({ history: [item, ...history].slice(0, 30) })
-  },
-
-  addLegacyToHistory: (a) => {
-    const item: HistoryItem = { format: "v1", data: a }
-    set((state) => ({
-      history: [item, ...state.history].slice(0, 30),
-    }))
-  },
-
-  resetAssessmentFlow: () =>
-    set({
-      address: "",
-      compass: INITIAL_COMPASS,
-      standingPoints: [],
-      currentPointDraft: null,
-      currentFullAssessment: null,
+  upsertExternalFeature: (f) =>
+    set((s) => {
+      if (!s.assessment) return {}
+      const rest = s.assessment.external.filter((x) => x.id !== f.id)
+      return { assessment: touch({ ...s.assessment, external: [...rest, f] }) }
     }),
+
+  removeExternalFeature: (id) =>
+    set((s) => s.assessment
+      ? { assessment: touch({ ...s.assessment, external: s.assessment.external.filter((x) => x.id !== id) }) }
+      : {}),
+
+  placeRoom: (room, palaces) =>
+    set((s) => {
+      if (!s.assessment) return {}
+      const rest = s.assessment.placements.filter((p) => p.room !== room)
+      const placements = palaces && palaces.length > 0
+        ? [...rest, { room, primaryPalace: palaces[0], palaces }]
+        : rest
+      return { assessment: touch({ ...s.assessment, placements }) }
+    }),
+
+  setChecklist: (cl) =>
+    set((s) => {
+      if (!s.assessment) return {}
+      const rest = s.assessment.checklists.filter((c) => c.room !== cl.room)
+      return { assessment: touch({ ...s.assessment, checklists: [...rest, cl] }) }
+    }),
+
+  setReportText: (text) =>
+    set((s) => s.assessment
+      ? { assessment: touch({ ...s.assessment, reportText: text }) }
+      : {}),
+
+  saveToHistory: () => {
+    const { assessment, history } = get()
+    if (!assessment) return
+    const item: HistoryItemV3 = { format: "v3", data: assessment }
+    const rest = history.filter((h) => !(h.format === "v3" && h.data.id === assessment.id))
+    set({ history: [item, ...rest].slice(0, 30) })
+  },
+
+  resetAssessment: () => set({ assessment: null, compass: INITIAL_COMPASS }),
 }))
