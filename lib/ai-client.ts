@@ -62,17 +62,42 @@ export type AiResult =
   | { ok: true;  text: string }
   | { ok: false; error: string }
 
-// ── MiniMax 调用（Anthropic 兼容接口）────────────────────────────────────────
-async function callMinimax(
+// ── Worker 代理（首选：开发者 Key 在服务端，用户无需配置）────────────────────
+const AI_WORKER_URL = "https://fengshui-ai.lodaviddai.workers.dev"
+
+async function callWorker(
   systemPrompt: string,
-  userPrompt:   string,
-  maxTokens     = 1500,
+  userPrompt: string,
+  maxTokens = 4000,
 ): Promise<AiResult> {
-  const apiKey = await getMinimaxKey()
-  if (!apiKey) return { ok: false, error: "未设置 MiniMax API Key" }
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 90_000)
+    const res = await fetch(`${AI_WORKER_URL}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ system: systemPrompt, prompt: userPrompt, maxTokens }),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    const data = await res.json() as { ok: boolean; text?: string; error?: string }
+    if (data.ok && data.text) return { ok: true, text: data.text }
+    return { ok: false, error: data.error ?? `worker ${res.status}` }
+  } catch (err) {
+    return { ok: false, error: `worker 不可达: ${err instanceof Error ? err.message : String(err)}` }
+  }
+}
 
-  const model = await getMinimaxModel()
-
+// ── MiniMax 调用（Anthropic 兼容接口）────────────────────────────────────────
+// ⚠ MiniMax M2 系列是推理模型，思考过程也计入 max_tokens —— 深度报告必须给足额度。
+// 截断检测：stop_reason/finish_reason = max_tokens/length 时自动续写一轮拼接。
+async function minimaxOnce(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  messages: { role: string; content: string }[],
+  maxTokens: number,
+): Promise<{ ok: true; text: string; truncated: boolean } | { ok: false; error: string }> {
   try {
     const res = await fetch(`${MINIMAX_ANTHROPIC_URL}/v1/messages`, {
       method: "POST",
@@ -84,43 +109,66 @@ async function callMinimax(
       body: JSON.stringify({
         model,
         max_tokens: maxTokens,
-        system:   systemPrompt,
-        messages: [{ role: "user", content: userPrompt }],
+        system: systemPrompt,
+        messages,
       }),
     })
 
     const rawBody = await res.text()
-
     if (!res.ok) {
       if (res.status === 401) return { ok: false, error: "MiniMax API Key 无效，请检查" }
       if (res.status === 429) return { ok: false, error: "请求过于频繁，请稍后重试" }
       return { ok: false, error: `MiniMax API 错误 ${res.status}: ${rawBody.slice(0, 200)}` }
     }
 
-    // 解析响应：兼容 Anthropic 格式 + OpenAI 兼容格式
     let data: any
     try { data = JSON.parse(rawBody) } catch {
       return { ok: false, error: `响应解析失败：${rawBody.slice(0, 100)}` }
     }
 
-    // Anthropic 格式: { content: [{ type: "text", text: "..." }] }
     const anthropicText = data?.content?.find?.((c: any) => c.type === "text")?.text as string | undefined
-    // OpenAI 格式: { choices: [{ message: { content: "..." } }] }
     const openaiText = data?.choices?.[0]?.message?.content as string | undefined
-
     const text = anthropicText || openaiText || ""
 
+    const stopReason = data?.stop_reason ?? data?.choices?.[0]?.finish_reason ?? ""
+    const truncated = stopReason === "max_tokens" || stopReason === "length"
+
     if (!text) {
-      // 输出原始响应帮助调试
       console.warn("[MiniMax] 空响应:", rawBody.slice(0, 300))
       return { ok: false, error: `AI 未返回有效内容。原始响应: ${rawBody.slice(0, 100)}` }
     }
-    return { ok: true, text }
-
+    return { ok: true, text, truncated }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { ok: false, error: `网络错误：${msg}` }
   }
+}
+
+async function callMinimax(
+  systemPrompt: string,
+  userPrompt:   string,
+  maxTokens     = 4000,
+): Promise<AiResult> {
+  const apiKey = await getMinimaxKey()
+  if (!apiKey) return { ok: false, error: "未设置 MiniMax API Key" }
+  const model = await getMinimaxModel()
+
+  const first = await minimaxOnce(apiKey, model, systemPrompt,
+    [{ role: "user", content: userPrompt }], maxTokens)
+  if (!first.ok) return first
+
+  // 截断 → 自动续写一轮（带上已生成内容，请它接着写）
+  if (first.truncated) {
+    const cont = await minimaxOnce(apiKey, model, systemPrompt, [
+      { role: "user", content: userPrompt },
+      { role: "assistant", content: first.text },
+      { role: "user", content: "你刚才的回答被截断了。请从中断处直接继续写完剩余内容，不要重复已写过的部分，不要加任何开场白。" },
+    ], maxTokens)
+    if (cont.ok && cont.text) {
+      return { ok: true, text: first.text + cont.text }
+    }
+  }
+  return { ok: true, text: first.text }
 }
 
 // ── Claude 调用（备用）────────────────────────────────────────────────────────
@@ -170,15 +218,28 @@ async function callClaude(
 export async function analyzeWithAI(
   systemPrompt: string,
   userPrompt:   string,
-  maxTokens     = 1500,
+  maxTokens?: number,
 ): Promise<AiResult> {
+  // ① Worker 代理（开发者 Key 在服务端，自带重试+续写）
+  const viaWorker = await callWorker(systemPrompt, userPrompt, maxTokens ?? 4000)
+  if (viaWorker.ok) return viaWorker
+  console.warn("[AI] worker 失败，降级本机 Key:", viaWorker.error)
+
+  // ② 本机 MiniMax Key（高级用户自配）
   if (await hasMinimaxKey()) {
-    return callMinimax(systemPrompt, userPrompt, maxTokens)
+    const viaMinimax = await callMinimax(systemPrompt, userPrompt, maxTokens ?? 4000)
+    if (viaMinimax.ok) return viaMinimax
+    console.warn("[AI] 本机 MiniMax 失败:", viaMinimax.error)
   }
+
+  // ③ 本机 Claude Key
   if (await getClaudeKey()) {
-    return callClaude(systemPrompt, userPrompt, maxTokens)
+    const viaClaude = await callClaude(systemPrompt, userPrompt, maxTokens ?? 4000)
+    if (viaClaude.ok) return viaClaude
   }
-  return { ok: false, error: "请先在设置页填写 MiniMax 或 Claude API Key" }
+
+  // 全部失败 → 调用方应回退到离线规则版报告
+  return { ok: false, error: "AI 服务暂时不可用（已尝试全部通道）" }
 }
 
 // 向后兼容

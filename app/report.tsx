@@ -12,6 +12,7 @@ import { PATTERN_MEANING } from "@/lib/fengshui/flying-stars"
 import { PALACE_ORDER_GRID, PALACE_INFO } from "@/lib/fengshui/palaces"
 import { buildV3SynthesisPrompt, V3_SYSTEM_PROMPT, buildV3DeepPrompt, V3_DEEP_SYSTEM_PROMPT } from "@/lib/fengshui/ai-prompts-v3"
 import { buildPrintHTML } from "@/lib/fengshui/print-report"
+import { generateOfflineDeepReport } from "@/lib/fengshui/offline-deep-report"
 import { purchaseDeepReport, DEEP_REPORT_PRICE, PURCHASE_TEST_MODE } from "@/lib/purchases"
 import { analyzeWithAI } from "@/lib/ai-client"
 import { FocusAreaPicker } from "@/components/FocusAreaPicker"
@@ -49,14 +50,19 @@ export default function ReportScreen() {
 
   const runAI = async () => {
     setAiLoading(true); setAiError(null)
-    // 付费深度版：更长篇幅 + 七节结构
+    // 三级通道：Worker代理 → 本机Key → 全失败时离线规则版兜底
     const result = await analyzeWithAI(
       V3_DEEP_SYSTEM_PROMPT,
       buildV3DeepPrompt(assessment, report),
-      1800,
+      4000,
     )
-    if (result.ok) setReportText(result.text)
-    else setAiError(result.error)
+    if (result.ok) {
+      setReportText(result.text)
+    } else {
+      // 兜底：离线规则版深度报告（100% 可用，付费用户绝不空手）
+      const offline = generateOfflineDeepReport(assessment, report)
+      setReportText(offline)
+    }
     setAiLoading(false)
   }
 
@@ -212,6 +218,7 @@ export default function ReportScreen() {
               "改善行动按「立刻/一月内/装修时」排期",
               "含飞星盘/房间布局/外局方位三张图",
               "可打印成 PDF 存档分享",
+              "网络异常也保证出报告（本地规则引擎兜底）",
             ].map((f) => (
               <Text key={f} style={styles.paywallFeature}>✓ {f}</Text>
             ))}

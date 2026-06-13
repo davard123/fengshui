@@ -1,0 +1,3 @@
+name = "fengshui-ai"
+main = "worker.js"
+compatibility_date = "2026-05-01"
