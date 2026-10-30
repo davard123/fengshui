@@ -46,4 +46,4 @@ node scripts/verify-annual-stars.mjs
 
 ## 发布
 
-见 [docs/APP_STORE.md](docs/APP_STORE.md)。简要：`npm run build:ios && npm run submit:ios`。
+见 [docs/APP_STORE.md](docs/APP_STORE.md)。不需要 Mac：Windows 双击 `release-ios.bat`，或 GitHub → Actions → 「iOS 打包并提交 App Store」。

@@ -8,8 +8,11 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#13100c",
-    "platforms": ["ios", "android", "web"],
-
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "ios": {
       "bundleIdentifier": "com.davidlo.fengshuiapp",
       "supportsTablet": false,
@@ -24,27 +27,29 @@
         "NSPrivacyAccessedAPITypes": [
           {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
-            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
           }
         ]
       }
     },
-
     "android": {
       "package": "com.davidlo.fengshuiapp",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#13100c"
       },
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
-
     "web": {
       "bundler": "metro",
       "output": "single",
       "favicon": "./assets/favicon.png"
     },
-
     "plugins": [
       "expo-router",
       [
@@ -64,14 +69,16 @@
       ],
       [
         "expo-sensors",
-        { "motionPermission": "用于读取手机方向传感器，作为罗盘测量房屋和房间的朝向。" }
+        {
+          "motionPermission": "用于读取手机方向传感器，作为罗盘测量房屋和房间的朝向。"
+        }
       ],
       "expo-iap"
     ],
-
     "extra": {
-      "router": { "origin": false },
-      "eas": { "projectId": "" }
+      "router": {
+        "origin": false
+      }
     }
   }
 }

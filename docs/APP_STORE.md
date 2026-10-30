@@ -24,10 +24,9 @@ Apple 开发者会员是**按年付费**的（每年 99 美元），不是一次
 |---|------|---------|
 | 1.1 | 签署 **付费 App 协议**（Paid Apps Agreement），填写**税务**和**银行账户**。不做这步，内购商品永远是「缺少元数据」，审核也过不了 | App Store Connect → 「协议、税务和银行业务」 |
 | 1.2 | 注册 Expo 账号（免费） | <https://expo.dev/signup> |
-| 1.3 | 电脑上装 EAS 命令行：`npm install -g eas-cli`，然后 `eas login` | 终端 |
-| 1.4 | 在项目目录执行 `eas init`（会自动把 projectId 写进 app.json） | 终端 |
+| 1.3 | Windows 电脑装好 Node.js LTS（<https://nodejs.org>） | 浏览器 |
 
-不需要 Mac：EAS 在云端打 iOS 包，证书和描述文件也由 EAS 自动生成和管理。
+**全程不需要 Mac。** iOS 包由 Expo 的 EAS 在云端 Mac 上打，证书和描述文件也由 EAS 自动生成、保存在云端；提交到 App Store Connect 也是 EAS 代劳。App Store Connect 的表单在任何电脑的浏览器里都能填。
 
 ---
 
@@ -89,21 +88,59 @@ App → 「功能」→「App 内购买项目」→ ＋
 
 ---
 
-## 4. 打包并上传
+## 4. 打包并上传（Windows PC 即可）
 
-```bash
-npm install
-npm run typecheck
-npm run build:ios      # EAS 云端打包，第一次会问你 Apple ID 登录，一路选默认即可（约 15–25 分钟）
-npm run submit:ios     # 把最新的包传到 App Store Connect
-```
+### 方式 A：双击 `release-ios.bat`（第一次必须用这个）
 
-上传后 10–30 分钟会在 TestFlight 里出现。**先用 TestFlight 在自己手机上走一遍完整流程，尤其是：**
+在项目文件夹里双击 **`release-ios.bat`**，它会依次：安装依赖 → 检查代码 → 登录 Expo → 云端打包 → 自动提交到 App Store Connect。
+
+第一次运行会在窗口里问你几件事，照下面回答：
+
+| 提问 | 回答 |
+|------|------|
+| Expo 账号 / 密码 | 第 1.2 步注册的账号 |
+| Create a project / link to existing project? | Yes |
+| Do you want to log in to your Apple account? | **Yes**，输入 Apple ID 和密码，再输入手机上收到的 6 位验证码 |
+| Generate a new Apple Distribution Certificate? | Yes |
+| Generate a new Apple Provisioning Profile? | Yes |
+| Generate a new App Store Connect API Key? | Yes |
+| What would you like your iOS bundle identifier to be? | 直接回车（`com.davidlo.fengshuiapp`） |
+
+打包约 15–25 分钟，结束后自动上传，再过 10–30 分钟在 App Store Connect 的 TestFlight 里就能看到。
+
+> Apple 账号密码只在你自己电脑上输入给 Apple / EAS，不会写进代码。
+> 跑完后 `app.json` 会多出 `projectId`，请提交到 GitHub。
+
+### 方式 B：以后在 GitHub 网页上点按钮（连电脑都不用开）
+
+第一次用方式 A 跑通后，证书已经保存在 EAS 云端，以后可以完全在 GitHub 网页上发版：
+
+1. 准备 App Store Connect API 密钥：App Store Connect → 用户和访问 → 集成 → App Store Connect API → 生成密钥（权限选「App 管理」），下载 `AuthKey_XXXX.p8`（只能下载一次，保存好）。
+2. Expo 令牌：expo.dev → 头像 → Account settings → Access tokens → Create。
+3. GitHub 仓库 → Settings → Secrets and variables → Actions → New repository secret，逐个添加：
+
+   | 名称 | 内容 |
+   |------|------|
+   | `EXPO_TOKEN` | 第 2 步的 Expo 令牌 |
+   | `ASC_APP_ID` | App 信息页的 Apple ID（一串数字） |
+   | `ASC_KEY_ID` | API 密钥的「密钥 ID」 |
+   | `ASC_ISSUER_ID` | API 密钥页面上方的「Issuer ID」 |
+   | `ASC_API_KEY_P8` | 用记事本打开 `.p8` 文件，全选复制粘贴 |
+
+4. 仓库 → **Actions** → 「iOS 打包并提交 App Store」→ **Run workflow**。约 30 分钟后新版本出现在 TestFlight。
+
+工作流定义在 `.github/workflows/ios-release.yml`；GitHub 只负责发指令和等结果，真正的打包在 EAS 云端完成。
+
+### 上传后：TestFlight 自测
+
+**先用 TestFlight 在自己手机上走一遍完整流程，尤其是：**
 
 - [ ] 罗盘能转、能锁定
 - [ ] 地址搜索 → 卫星图 → 确认轮廓
 - [ ] 买深度报告（TestFlight 里是沙盒支付，不扣钱）→ 报告生成
 - [ ] 导出 PDF → 分享
+
+最后回到 App Store Connect，在版本页选中这个 build，填完第 5 节资料后点「提交审核」——这一步也是在浏览器里完成。
 
 ---
 
@@ -224,6 +261,7 @@ No account or login is required. All user data stays on device.
 - [x] **数据删除**：「我的 → 清除本机全部数据」
 - [x] **Worker 防滥用**：`X-App-Token` 校验 + prompt 长度上限
 - [x] **EAS 配置**：`eas.json`（production 自动递增 build 号）
+- [x] **免 Mac 发布**：`release-ios.bat`（Windows 一键）+ `.github/workflows/ios-release.yml`（GitHub 网页一键）
 - [x] 已在 Linux 上跑通 `expo prebuild --platform ios`，确认所有 config plugin 能正常生成原生工程
 
 ---
@@ -232,7 +270,7 @@ No account or login is required. All user data stays on device.
 
 1. 改代码 → `npm run typecheck`
 2. `app.json` 里把 `version` 改成新版本号（如 `1.1.0`；build 号 EAS 会自动加）
-3. `npm run build:ios && npm run submit:ios`
+3. 双击 `release-ios.bat`，或在 GitHub Actions 里点 Run workflow
 4. App Store Connect 里新建版本 → 选这个 build → 写更新说明 → 提交
 
 重新生成商店截图：

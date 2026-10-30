@@ -1,0 +1,70 @@
+# 在 GitHub 网页上一键打包 iOS 并提交 App Store（不需要 Mac，也不需要开电脑）
+#
+# 用法：GitHub 仓库 → Actions → 「iOS 打包并提交 App Store」→ Run workflow
+#
+# 前提（只做一次，见 docs/APP_STORE.md 第 4 节）：
+#   1. 在 PC 上运行过一次 release-ios.bat（生成证书并保存在 EAS 云端，app.json 里有 projectId）
+#   2. 在 仓库 Settings → Secrets and variables → Actions 添加以下 Secrets：
+#      EXPO_TOKEN      expo.dev → Account settings → Access tokens 生成
+#      ASC_APP_ID      App Store Connect → App 信息 → Apple ID（一串数字）
+#      ASC_KEY_ID      App Store Connect → 用户和访问 → 集成 → App Store Connect API 的「密钥 ID」
+#      ASC_ISSUER_ID   同一页面上方的 Issuer ID
+#      ASC_API_KEY_P8  下载的 AuthKey_XXXX.p8 文件的全部文本内容
+name: iOS 打包并提交 App Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: "打包完成后自动提交到 App Store Connect（TestFlight）"
+        type: boolean
+        default: true
+
+jobs:
+  ios:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 代码与算法检查
+        run: |
+          npm run typecheck
+          node scripts/verify-flying-stars.mjs
+          node scripts/verify-annual-stars.mjs
+
+      - name: 准备 App Store Connect API Key
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+        run: |
+          printf '%s\n' "$ASC_API_KEY_P8" > "$RUNNER_TEMP/asc-api-key.p8"
+          echo "EXPO_ASC_API_KEY_PATH=$RUNNER_TEMP/asc-api-key.p8" >> "$GITHUB_ENV"
+          # 非交互提交必须在 eas.json 里写 ascAppId
+          node -e "const f='eas.json',j=require('./'+f);j.submit.production.ios={ascAppId:process.env.ASC_APP_ID};require('fs').writeFileSync(f,JSON.stringify(j,null,2))"
+
+      - name: 云端打包 iOS（EAS Build）
+        env:
+          EXPO_ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: eas build --platform ios --profile production --non-interactive --wait
+
+      - name: 提交到 App Store Connect（EAS Submit）
+        if: ${{ inputs.submit }}
+        env:
+          EXPO_ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: eas submit --platform ios --profile production --latest --non-interactive --wait
