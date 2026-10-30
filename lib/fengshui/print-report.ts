@@ -13,6 +13,7 @@ import type { AssessmentV3, PalaceId } from "@/types/fengshui"
 import type { ReportV3 } from "./report-v3"
 import { PALACE_ORDER_GRID, PALACE_INFO, ROOM_INFO, RING_CONFIG, type RoomType } from "./palaces"
 import { PATTERN_MEANING } from "./flying-stars"
+import { computeAnnualChart, annualNotes } from "./annual-stars"
 
 const GOOD_STARS = new Set(["生气", "延年", "天医", "伏位"])
 
@@ -152,9 +153,17 @@ function findingRows(
     </div>`).join("")
 }
 
+const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
 // ── 主函数 ───────────────────────────────────────────────────────────────────
 export function buildPrintHTML(a: AssessmentV3, r: ReportV3): string {
   const date = new Date().toLocaleDateString("zh-CN")
+  const annual = computeAnnualChart(new Date().getFullYear())
+  const annualList = annualNotes(
+    annual,
+    a.placements.map((p) => ({ room: p.room, palaces: p.palaces ?? [p.primaryPalace] })),
+    (room) => ROOM_INFO[room as RoomType]?.label ?? room,
+  )
   const fsPattern = r.flyingStars ? PATTERN_MEANING[r.flyingStars.pattern] : null
   const allNeg = [...r.exterior, ...(r.bazhai?.findings ?? []), ...r.interior].filter((f) => f.score < 0).sort((x, y) => x.score - y.score)
   const allPos = [...r.exterior, ...(r.bazhai?.findings ?? []), ...r.interior].filter((f) => f.score > 0).sort((x, y) => y.score - x.score)
@@ -163,7 +172,7 @@ export function buildPrintHTML(a: AssessmentV3, r: ReportV3): string {
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>风水评估报告 - ${a.address}</title>
+<title>风水评估报告 - ${esc(a.address)}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -233,7 +242,7 @@ export function buildPrintHTML(a: AssessmentV3, r: ReportV3): string {
 
 <div class="cover">
   <h1>阳宅风水评估报告</h1>
-  <div class="addr">${a.address}</div>
+  <div class="addr">${esc(a.address)}</div>
   <div class="meta">${r.orientationText}${a.builtYear ? ` · ${a.builtYear}年建造` : ""} · 评估日期 ${date}</div>
   <div class="rating-badge" style="color:${r.overallScore >= 0 ? "#2d6a3f" : "#b03020"};">${r.overallRating}</div>
   <div class="summary">${r.summary}</div>
@@ -292,6 +301,11 @@ ${a.reportText ? `
   <div class="ai-text">${a.reportText.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
 </div>` : ""}
 
+<div class="sec">
+  <h2>附 · ${annual.year} ${annual.ganzhi}年流年提醒</h2>
+  ${annualList.map((n) => `<div class="finding ${n.good ? "good" : "bad"}"><div class="f-desc">${n.good ? "✓" : "⚠"} ${n.text}</div></div>`).join("")}
+</div>
+
 ${allPos.length + allNeg.length > 0 ? `
 <div class="sec">
   <h2>附录 · 格局总表</h2>
@@ -303,7 +317,7 @@ ${allPos.length + allNeg.length > 0 ? `
 
 <div class="footer">
   本报告基于传统风水文化（玄空飞星·八宅·峦头）与公开地理数据自动生成，仅供文化参考与娱乐，<br>
-  不构成购房、投资、医疗或任何重大决策建议。 · 九宫风水参考 App · ${date}
+  不构成购房、投资、医疗或任何重大决策建议。 · 九宫风水 App · ${date}
 </div>
 </body>
 </html>`

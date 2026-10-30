@@ -4,6 +4,8 @@
 import type { AssessmentV3 } from "@/types/fengshui"
 import type { ReportV3, SectionReport } from "./report-v3"
 import { isQuickModeProfile } from "./quickmode"
+import { computeAnnualChart, annualNotes } from "./annual-stars"
+import { ROOM_INFO, type RoomType } from "./palaces"
 
 function sectionBlock(title: string, s: SectionReport): string[] {
   if (s.highlights.length === 0 && s.cautions.length === 0) return []
@@ -23,6 +25,17 @@ export function buildV3SynthesisPrompt(a: AssessmentV3, r: ReportV3): string {
   lines.push(...sectionBlock("第三层 外局峦头（距离越近影响越大）", r.sections.exterior))
   lines.push(...sectionBlock("第四层 八宅内局" + (r.bazhai ? `（${r.bazhai.houseGua}）` : ""), r.sections.bazhai))
   lines.push(...sectionBlock("第五层 室内细节", r.sections.interior))
+
+  // 流年（当年）
+  const annual = computeAnnualChart(new Date().getFullYear())
+  const annualList = annualNotes(
+    annual,
+    a.placements.map((p) => ({ room: p.room, palaces: p.palaces ?? [p.primaryPalace] })),
+    (room) => ROOM_INFO[room as RoomType]?.label ?? room,
+  )
+  lines.push("")
+  lines.push(`【${annual.year} ${annual.ganzhi}年流年】`)
+  for (const n of annualList) lines.push(`  ${n.good ? "+" : "-"} ${n.text}`)
 
   lines.push("")
   lines.push(`【系统总评】${r.overallRating}（${r.overallScore.toFixed(1)}分）。${r.summary}`)
@@ -85,7 +98,7 @@ export function buildV3DeepPrompt(a: AssessmentV3, r: ReportV3): string {
   lines.push("三、外局形势：周边环境的利弊与化解（结合距离远近谈轻重）")
   lines.push("四、内局布置：逐个重要房间（大门/主卧/灶位等）给具体建议，包括颜色、材质、摆放")
   lines.push("五、五行调理：根据格局给出宜用的颜色体系与材质方向")
-  lines.push("六、居住注意：日常使用中要养成/避免的习惯（3-5条）")
+  lines.push("六、居住注意与今年流年：日常使用中要养成/避免的习惯（3-5条），并结合今年流年说明哪些方位今年宜静、忌动土")
   lines.push("七、改善优先级：把所有建议按「立刻做/一月内/装修时」三档排序")
   lines.push("")
   lines.push("要求：中文 800-1000 字，专业但通俗，积极建设，不危言耸听，各层结论冲突时给出权衡判断。")

@@ -14,7 +14,13 @@
  * 部署：
  *   cd worker && npx wrangler deploy
  *   npx wrangler secret put MINIMAX_API_KEY   ← 粘贴你的 MiniMax Key
+ *   npx wrangler secret put APP_TOKEN         ← 填 lib/ai-client.ts 里的 AI_WORKER_TOKEN（可选，设置后才校验）
+ *
+ * 防滥用：校验 X-App-Token（设置了 APP_TOKEN 时）+ 限制 prompt 长度。
+ * 如需按 IP 限流，可在 Cloudflare 控制台给该 Worker 加 Rate Limiting 规则。
  */
+
+const MAX_PROMPT_CHARS = 40000
 
 const MINIMAX_URL = "https://api.minimaxi.com/anthropic/v1/messages"
 const MODEL = "MiniMax-M2.5-highspeed"
@@ -22,7 +28,7 @@ const MODEL = "MiniMax-M2.5-highspeed"
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, X-App-Token",
 }
 
 function json(data, status = 200) {
@@ -87,12 +93,19 @@ export default {
       return json({ ok: false, error: "worker not configured (missing MINIMAX_API_KEY secret)" }, 503)
     }
 
+    if (env.APP_TOKEN && request.headers.get("X-App-Token") !== env.APP_TOKEN) {
+      return json({ ok: false, error: "unauthorized" }, 401)
+    }
+
     let body
     try { body = await request.json() } catch {
       return json({ ok: false, error: "invalid json" }, 400)
     }
     const { system, prompt, maxTokens } = body || {}
     if (!system || !prompt) return json({ ok: false, error: "missing system/prompt" }, 400)
+    if (String(system).length + String(prompt).length > MAX_PROMPT_CHARS) {
+      return json({ ok: false, error: "prompt too long" }, 413)
+    }
     const mt = Math.min(Math.max(Number(maxTokens) || 4000, 500), 8000)
 
     // 主回答（带重试）

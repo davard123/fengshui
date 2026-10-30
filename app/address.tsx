@@ -1,58 +1,60 @@
 /**
  * 第 1 步 — 定位房屋
  * 输入地址 → Nominatim 定位 → Overpass 拉建筑轮廓 → 卫星图确认/手描 → 太极点确定
+ * 公寓或地图找不到时：可跳过地图，直接到第 2 步用罗盘定向（外局改为手动添加）
  */
 import { router } from "expo-router"
 import { useEffect, useState } from "react"
-import {
-  View, Text, TextInput, Pressable, StyleSheet,
-  Platform, ScrollView, ActivityIndicator,
-} from "react-native"
+import { View, Text, Platform, StyleSheet } from "react-native"
 import WebView from "react-native-webview"
 import { useAppStore } from "@/store/useAppStore"
 import { geocodeAddress, type Coords } from "@/lib/geo/nominatim"
 import { fetchBuildingFootprint, manualFootprint, polygonCentroid } from "@/lib/geo/footprint"
 import { buildFootprintMapHTML } from "@/lib/geo/map-html"
+import { Button, Card, Em, Field, Notice, Screen, StepHeader } from "@/components/ui"
+import { C } from "@/lib/theme"
 import type { GeoPoint } from "@/types/fengshui"
+
+type Tone = "info" | "good" | "bad"
 
 export default function AddressScreen() {
   const assessment      = useAppStore((s) => s.assessment)
   const startAssessment = useAppStore((s) => s.startAssessment)
   const setFootprint    = useAppStore((s) => s.setFootprint)
 
-  const [draft, setDraft]       = useState(assessment?.address ?? "")
-  const [coords, setCoords]     = useState<Coords | null>(null)
+  const [draft, setDraft]           = useState(assessment?.address ?? "")
+  const [coords, setCoords]         = useState<Coords | null>(null)
   const [osmPolygon, setOsmPolygon] = useState<GeoPoint[] | null>(null)
-  const [mapKey, setMapKey]     = useState(0)
-  const [confirmed, setConfirmed] = useState(false)
-  const [loading, setLoading]   = useState(false)
-  const [notice, setNotice]     = useState("")
+  const [mapKey, setMapKey]         = useState(0)
+  const [confirmed, setConfirmed]   = useState(!!assessment?.footprint)
+  const [loading, setLoading]       = useState(false)
+  const [notice, setNotice]         = useState<{ tone: Tone; text: string } | null>(null)
 
   const handleSearch = async () => {
     const q = draft.trim()
     if (!q) return
     setLoading(true)
-    setNotice("")
+    setNotice(null)
     setCoords(null)
     setOsmPolygon(null)
     setConfirmed(false)
 
     const c = await geocodeAddress(q)
     if (!c) {
-      setNotice("⚠ 找不到该地址，请加上城市/州（如 123 Main St, Irvine CA）")
+      setNotice({ tone: "bad", text: "找不到这个地址。请加上城市和州/省（如 123 Main St, Irvine, CA），或使用下方「跳过地图」。" })
       setLoading(false)
       return
     }
     startAssessment(q)
     setCoords(c)
-    setNotice("正在查找建筑轮廓…")
+    setNotice({ tone: "info", text: "正在查找建筑轮廓…" })
 
     const fp = await fetchBuildingFootprint(c)
     if (fp) {
       setOsmPolygon(fp.polygon)
-      setNotice("✓ 找到建筑轮廓。地图上确认是你的房子（红点=太极点），不对就点右下角手描")
+      setNotice({ tone: "good", text: "找到建筑轮廓。请在地图上确认是你的房子（红点为宅中心），不对可点右下角手描。" })
     } else {
-      setNotice("OSM 无此建筑轮廓 — 请在卫星图上沿房屋四角手描（点回起点闭合）")
+      setNotice({ tone: "info", text: "地图数据里没有这栋房子的轮廓 —— 请在卫星图上沿房屋外墙四角依次点击，回到起点闭合。" })
     }
     setMapKey((k) => k + 1)
     setLoading(false)
@@ -88,43 +90,35 @@ export default function AddressScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [osmPolygon])
 
-  const mapHtml = coords ? buildFootprintMapHTML(
-    { lat: coords.lat, lon: coords.lon },
-    osmPolygon,
-  ) : null
+  const skipMap = () => {
+    startAssessment(draft.trim() || "我的住宅")
+    router.push("/orientation")
+  }
+
+  const mapHtml = coords ? buildFootprintMapHTML({ lat: coords.lat, lon: coords.lon }, osmPolygon) : null
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>第 1 步 · 定位房屋</Text>
-      <Text style={styles.copy}>
-        输入地址后，系统在卫星图上找到房屋轮廓并确定<Text style={styles.bold}>宅中心（太极点）</Text>——
-        这是后续所有方位判断的唯一原点。
-      </Text>
+    <Screen>
+      <StepHeader
+        step={1}
+        title="定位房屋"
+        subtitle={<>输入地址，在卫星图上找到房屋轮廓，确定<Em>宅中心（太极点）</Em>——之后所有方位都从这一点量起。</>}
+      />
 
       <View style={styles.searchRow}>
-        <TextInput
-          value={draft} onChangeText={setDraft}
-          onSubmitEditing={handleSearch} returnKeyType="search"
-          placeholder="123 Main St, Irvine, CA"
-          placeholderTextColor="#bfad9c"
-          style={styles.input} autoCapitalize="words" autoCorrect={false}
-        />
-        <Pressable
-          onPress={handleSearch}
-          disabled={loading || !draft.trim()}
-          style={[styles.searchBtn, (loading || !draft.trim()) && styles.btnDisabled]}
-        >
-          {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.searchBtnText}>查找</Text>}
-        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Field
+            value={draft} onChangeText={setDraft}
+            onSubmitEditing={handleSearch} returnKeyType="search"
+            placeholder="123 Main St, Irvine, CA"
+            autoCapitalize="words" autoCorrect={false}
+            style={{ fontSize: 15 }}
+          />
+        </View>
+        <Button title="查找" onPress={handleSearch} loading={loading} disabled={!draft.trim()} style={styles.searchBtn} />
       </View>
 
-      {!!notice && (
-        <Text style={[styles.notice,
-          notice.startsWith("✓") ? styles.noticeGood :
-          notice.startsWith("⚠") ? styles.noticeWarn : styles.noticeInfo]}>
-          {notice}
-        </Text>
-      )}
+      {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
 
       {mapHtml && (
         <View style={styles.mapCard}>
@@ -148,38 +142,30 @@ export default function AddressScreen() {
       )}
 
       {confirmed && (
-        <Pressable onPress={() => router.push("/orientation")} style={styles.nextBtn}>
-          <Text style={styles.nextBtnText}>太极点已定 · 下一步：定向 →</Text>
-        </Pressable>
+        <>
+          <Notice tone="good">✓ 太极点已确定</Notice>
+          <Button title="下一步：定向 →" onPress={() => router.push("/orientation")} />
+        </>
       )}
-    </ScrollView>
+
+      {!confirmed && (
+        <Card>
+          <Text style={styles.altTitle}>住公寓，或地图上找不到？</Text>
+          <Text style={styles.altText}>
+            可以跳过地图，直接到大门口用手机罗盘测朝向。周边环境改为手动添加，其余分析不受影响。
+          </Text>
+          <Button title="跳过地图，用罗盘定向" variant="secondary" small onPress={skipMap} />
+        </Card>
+      )}
+    </Screen>
   )
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, backgroundColor: "#fffaf3", gap: 14, flexGrow: 1 },
-  title:     { fontSize: 24, fontWeight: "800", color: "#2a2118" },
-  copy:      { fontSize: 14, color: "#5a4a3c", lineHeight: 22 },
-  bold:      { fontWeight: "800", color: "#6b3e1a" },
-
-  searchRow: { flexDirection: "row", gap: 10 },
-  input: {
-    flex: 1, borderWidth: 1, borderColor: "#d9cbbb", borderRadius: 14,
-    paddingHorizontal: 14, paddingVertical: 13,
-    backgroundColor: "#fff", fontSize: 14, color: "#2a2118",
-  },
-  searchBtn:    { backgroundColor: "#2a2118", borderRadius: 14, paddingHorizontal: 18, justifyContent: "center" },
-  btnDisabled:  { backgroundColor: "#bfad9c" },
-  searchBtnText:{ color: "#fff", fontWeight: "800", fontSize: 14 },
-
-  notice:     { fontSize: 13, lineHeight: 18 },
-  noticeGood: { color: "#2d6a3f" },
-  noticeWarn: { color: "#c0392b" },
-  noticeInfo: { color: "#5a4a3c" },
-
-  mapCard: { borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: "#eadfce" },
+  searchRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  searchBtn: { minWidth: 76 },
+  mapCard: { borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: C.line },
   mapBox:  { width: "100%", height: 420 } as object,
-
-  nextBtn:     { backgroundColor: "#2a2118", paddingVertical: 16, borderRadius: 16, alignItems: "center" },
-  nextBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  altTitle:{ fontSize: 14, fontWeight: "800", color: C.text },
+  altText: { fontSize: 13, color: C.textMuted, lineHeight: 19 },
 })

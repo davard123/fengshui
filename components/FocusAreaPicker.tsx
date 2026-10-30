@@ -1,5 +1,6 @@
 import { View, Text, Pressable, StyleSheet } from "react-native"
 import { FOCUS_AREA_OPTIONS, type FocusArea } from "@/types/fengshui"
+import { C } from "@/lib/theme"
 
 type Props = {
   selected:  FocusArea[]
@@ -17,8 +18,8 @@ export function FocusAreaPicker({ selected, onChange }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>您最关注哪些运势？</Text>
-      <Text style={styles.hint}>多选，报告将重点分析所选方向（不选则显示完整格局）</Text>
+      <Text style={styles.title}>你最关心哪些方面？</Text>
+      <Text style={styles.hint}>可多选，下方只显示相关格局（不选则显示全部）</Text>
       <View style={styles.grid}>
         {FOCUS_AREA_OPTIONS.map(({ area, icon, desc }) => {
           const on = selected.includes(area)
@@ -47,36 +48,19 @@ export function FocusAreaPicker({ selected, onChange }: Props) {
 
 const styles = StyleSheet.create({
   container: { gap: 10 },
-  title:     { fontSize: 17, fontWeight: "800", color: "#2a2118" },
-  hint:      { fontSize: 12, color: "#8d6b4c" },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
+  title:     { fontSize: 15, fontWeight: "800", color: C.text },
+  hint:      { fontSize: 12, color: C.textMuted, marginTop: -4 },
+  grid:      { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
-    width: "47%",
-    flexGrow: 1,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: "#eadfce",
-    padding: 12,
-    gap: 2,
+    width: "47%", flexGrow: 1, backgroundColor: C.surface2, borderRadius: 12,
+    borderWidth: 1, borderColor: C.line, padding: 10, gap: 1,
   },
-  chipOn: {
-    backgroundColor: "#2a2118",
-    borderColor: "#2a2118",
-  },
-  icon:    { fontSize: 22 },
-  label:   { fontSize: 14, fontWeight: "800", color: "#2a2118" },
-  labelOn: { color: "#f0d060" },
-  desc:    { fontSize: 11, color: "#8d6b4c" },
-  descOn:  { color: "#a89060" },
-  clearBtn: {
-    alignSelf: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-  },
-  clearText: { fontSize: 12, color: "#8d6b4c", textDecorationLine: "underline" },
+  chipOn:  { backgroundColor: "#2e2414", borderColor: C.gold },
+  icon:    { fontSize: 18 },
+  label:   { fontSize: 13, fontWeight: "800", color: C.text },
+  labelOn: { color: C.goldBright },
+  desc:    { fontSize: 11, color: C.textMuted },
+  descOn:  { color: C.textSub },
+  clearBtn:  { alignSelf: "center", paddingVertical: 6, paddingHorizontal: 16 },
+  clearText: { fontSize: 12, color: C.textMuted, textDecorationLine: "underline" },
 })

@@ -16,7 +16,7 @@ export type SectorEnergy = "生气" | "延年" | "天医" | "伏位" | "祸害" 
 //   乾六天五祸绝延生 / 坎五天生延绝祸六 / 艮六绝祸生延天五 / 震延生祸绝五天六
 //   巽天五六祸生绝延 / 离六五绝延祸生天 / 坤天延绝生祸五六 / 兑生祸延绝六五天
 //   （宫序按 乾坎艮震巽离坤兑 循环）
-const EIGHT_MANSIONS: Record<string, Record<string, SectorEnergy>> = {
+export const EIGHT_MANSIONS: Record<string, Record<string, SectorEnergy>> = {
   N:  { N: "伏位", NE: "五鬼", E: "天医", SE: "生气", S: "延年", SW: "绝命", W: "祸害", NW: "六煞" }, // 坎宅
   NE: { NE: "伏位", E: "六煞", SE: "绝命", S: "祸害", SW: "生气", W: "延年", NW: "天医", N: "五鬼" }, // 艮宅
   E:  { E: "伏位", SE: "延年", S: "生气", SW: "祸害", W: "绝命", NW: "五鬼", N: "天医", NE: "六煞" }, // 震宅
@@ -27,7 +27,7 @@ const EIGHT_MANSIONS: Record<string, Record<string, SectorEnergy>> = {
   NW: { NW: "伏位", N: "六煞", NE: "天医", E: "五鬼", SE: "祸害", S: "绝命", SW: "延年", W: "生气" }, // 乾宅
 }
 
-const ENERGY_INFO: Record<SectorEnergy, { good: boolean; rank: number; desc: string }> = {
+export const ENERGY_INFO: Record<SectorEnergy, { good: boolean; rank: number; desc: string }> = {
   生气: { good: true, rank: 4, desc: "最吉·财旺人旺" },
   延年: { good: true, rank: 3, desc: "吉·婚姻健康" },
   天医: { good: true, rank: 2, desc: "吉·健康贵人" },

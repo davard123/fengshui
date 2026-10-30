@@ -14,7 +14,7 @@ const MINIMAX_MODEL_DEFAULT = "MiniMax-M2.7-highspeed"  // 速度快，适合实
 
 // Claude 备用配置
 const CLAUDE_BASE_URL = "https://api.anthropic.com/v1"
-const CLAUDE_MODEL    = "claude-3-5-haiku-20241022"
+const CLAUDE_MODEL    = "claude-haiku-5-5"
 
 // ── API Key 管理 ───────────────────────────────────────────────────────────────
 
@@ -64,6 +64,8 @@ export type AiResult =
 
 // ── Worker 代理（首选：开发者 Key 在服务端，用户无需配置）────────────────────
 const AI_WORKER_URL = "https://fengshui-ai.lodaviddai.workers.dev"
+// 与 Worker 的 APP_TOKEN secret 对应：挡掉随手调用接口的脚本（不是强安全措施）
+const AI_WORKER_TOKEN = "fs-app-2026"
 
 async function callWorker(
   systemPrompt: string,
@@ -75,7 +77,7 @@ async function callWorker(
     const timer = setTimeout(() => controller.abort(), 90_000)
     const res = await fetch(`${AI_WORKER_URL}/generate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-App-Token": AI_WORKER_TOKEN },
       body: JSON.stringify({ system: systemPrompt, prompt: userPrompt, maxTokens }),
       signal: controller.signal,
     })

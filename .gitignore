@@ -10,3 +10,7 @@ dist/
 .env.local
 *.tsbuildinfo
 qrcode.html
+
+# Expo CNG：原生工程由 prebuild / EAS 生成，不入库
+/ios
+/android
