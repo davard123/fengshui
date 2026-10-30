@@ -1,28 +1,67 @@
 /**
  * 第 6 步 — 综合报告
- * 定向卡 → 飞星盘九宫图 → 外局 → 八宅 → 细节 → 总评 → 可选 AI 综合
+ * 总评仪表 → 分层得分 → 运势雷达 → 飞星盘 → 流年 → 格局明细 → 改善行动 → 深度报告（付费）→ 导出
  */
 import { router } from "expo-router"
-import { useMemo, useState } from "react"
-import { ScrollView, View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from "react-native"
+import { useEffect, useMemo, useState } from "react"
+import { ActivityIndicator, Alert, Platform, StyleSheet, Text, View } from "react-native"
+import Svg, { Circle } from "react-native-svg"
 import * as Print from "expo-print"
+import * as Sharing from "expo-sharing"
 import { useAppStore } from "@/store/useAppStore"
-import { generateReportV3, RATING_COLOR_V3, RATING_BG_V3 } from "@/lib/fengshui/report-v3"
+import { generateReportV3 } from "@/lib/fengshui/report-v3"
 import { PATTERN_MEANING } from "@/lib/fengshui/flying-stars"
-import { PALACE_ORDER_GRID, PALACE_INFO } from "@/lib/fengshui/palaces"
-import { buildV3SynthesisPrompt, V3_SYSTEM_PROMPT, buildV3DeepPrompt, V3_DEEP_SYSTEM_PROMPT } from "@/lib/fengshui/ai-prompts-v3"
+import { computeAnnualChart, annualNotes, ANNUAL_STAR_INFO } from "@/lib/fengshui/annual-stars"
+import { ROOM_INFO, type RoomType } from "@/lib/fengshui/palaces"
+import { buildV3DeepPrompt, V3_DEEP_SYSTEM_PROMPT } from "@/lib/fengshui/ai-prompts-v3"
 import { buildPrintHTML } from "@/lib/fengshui/print-report"
 import { generateOfflineDeepReport } from "@/lib/fengshui/offline-deep-report"
-import { purchaseDeepReport, DEEP_REPORT_PRICE, PURCHASE_TEST_MODE } from "@/lib/purchases"
+import { purchaseDeepReport, getDeepReportPrice, isPurchaseTestMode } from "@/lib/purchases"
 import { analyzeWithAI } from "@/lib/ai-client"
 import { FocusAreaPicker } from "@/components/FocusAreaPicker"
-import type { FocusArea } from "@/types/fengshui"
+import { NineGrid } from "@/components/NineGrid"
+import { Badge, Button, Card, Notice, ScoreBar, Screen, SectionTitle } from "@/components/ui"
+import { C, RATING_TONE } from "@/lib/theme"
+import { FOCUS_AREA_OPTIONS, type FocusArea } from "@/types/fengshui"
 
 type AnyFinding = {
   id: string; name: string; score: number
   location: string; description: string
   classic?: string; suggestion?: string
   affects?: FocusArea[]
+}
+
+/** 总评仪表：-10..+10 映射为圆环进度 */
+function ScoreDial({ score, rating }: { score: number; rating: string }) {
+  const tone = RATING_TONE[rating] ?? RATING_TONE["中平"]
+  const size = 148, stroke = 10, r = (size - stroke) / 2
+  const circ = 2 * Math.PI * r
+  const pct = (Math.max(-10, Math.min(10, score)) + 10) / 20
+  return (
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
+        <Circle cx={size / 2} cy={size / 2} r={r} stroke={C.surface3} strokeWidth={stroke} fill="none" />
+        <Circle
+          cx={size / 2} cy={size / 2} r={r} stroke={tone.fg} strokeWidth={stroke} fill="none"
+          strokeDasharray={`${circ * pct} ${circ}`} strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </Svg>
+      <Text style={[styles.dialRating, { color: tone.fg }]}>{rating}</Text>
+      <Text style={styles.dialScore}>{score > 0 ? `+${score}` : score} 分</Text>
+    </View>
+  )
+}
+
+function FindingItem({ f, good }: { f: AnyFinding; good: boolean }) {
+  return (
+    <View style={[styles.finding, { borderLeftColor: good ? C.good : C.bad }]}>
+      <Text style={styles.fName}>{f.name} <Text style={styles.fLoc}>{f.location}</Text></Text>
+      <Text style={styles.fDesc}>{f.description}</Text>
+      {f.classic ? <Text style={styles.fClassic}>📜 {f.classic}</Text> : null}
+      {!good && f.suggestion ? <Text style={styles.fSug}>💡 {f.suggestion}</Text> : null}
+    </View>
+  )
 }
 
 export default function ReportScreen() {
@@ -33,335 +72,269 @@ export default function ReportScreen() {
 
   const [focusAreas, setFocusAreas] = useState<FocusArea[]>([])
   const [aiLoading, setAiLoading]   = useState(false)
-  const [aiError, setAiError]       = useState<string | null>(null)
+  const [buying, setBuying]         = useState(false)
+  const [price, setPrice]           = useState("$1.99")
+  const [exporting, setExporting]   = useState(false)
 
   const report = useMemo(() => assessment ? generateReportV3(assessment) : null, [assessment])
+  const annual = useMemo(() => computeAnnualChart(new Date().getFullYear()), [])
+
+  // 报告页即自动保存到记录（同 id 覆盖）
+  useEffect(() => {
+    if (assessment?.orientation) saveToHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assessment?.updatedAt])
+
+  useEffect(() => { getDeepReportPrice().then(setPrice) }, [])
 
   if (!assessment || !report) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.copy}>暂无评估数据。</Text>
-        <Pressable onPress={() => router.replace("/address")} style={styles.saveBtn}>
-          <Text style={styles.saveBtnText}>开始新评估 →</Text>
-        </Pressable>
-      </View>
+      <Screen>
+        <Notice tone="warn">暂无评估数据。</Notice>
+        <Button title="开始新评估 →" onPress={() => router.replace("/address")} />
+      </Screen>
     )
   }
 
   const runAI = async () => {
-    setAiLoading(true); setAiError(null)
-    // 三级通道：Worker代理 → 本机Key → 全失败时离线规则版兜底
-    const result = await analyzeWithAI(
-      V3_DEEP_SYSTEM_PROMPT,
-      buildV3DeepPrompt(assessment, report),
-      4000,
-    )
-    if (result.ok) {
-      setReportText(result.text)
-    } else {
-      // 兜底：离线规则版深度报告（100% 可用，付费用户绝不空手）
-      const offline = generateOfflineDeepReport(assessment, report)
-      setReportText(offline)
-    }
+    setAiLoading(true)
+    // 三级通道：Worker 代理 → 本机 Key → 全失败时离线规则版兜底
+    const result = await analyzeWithAI(V3_DEEP_SYSTEM_PROMPT, buildV3DeepPrompt(assessment, report), 4000)
+    setReportText(result.ok ? result.text : generateOfflineDeepReport(assessment, report))
     setAiLoading(false)
   }
 
   const handleBuy = async () => {
+    setBuying(true)
     const res = await purchaseDeepReport()
+    setBuying(false)
     if (res.ok) {
       setAiUnlocked(true)
-      void runAI()   // 购买成功立即生成
+      void runAI()
+    } else if (res.reason !== "cancelled") {
+      const msg = res.message ?? "购买未完成，请稍后再试。"
+      if (Platform.OS === "web") window.alert(msg)
+      else Alert.alert("购买未完成", msg)
     }
   }
 
-  const handlePrint = async () => {
+  const handleExport = async () => {
     const html = buildPrintHTML(assessment, report)
     if (Platform.OS === "web") {
       const w = typeof window !== "undefined" ? window.open("", "_blank") : null
       if (w) { w.document.write(html); w.document.close() }
       return
     }
+    setExporting(true)
     try {
-      await Print.printAsync({ html })   // iOS: 系统打印面板，可存 PDF
+      const { uri } = await Print.printToFileAsync({ html })
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf", dialogTitle: "分享风水报告" })
+      } else {
+        await Print.printAsync({ uri })
+      }
     } catch {}
+    setExporting(false)
   }
 
   // 按关注运势过滤 findings
-  const allFindings: AnyFinding[] = [
-    ...report.exterior,
-    ...(report.bazhai?.findings ?? []),
-    ...report.interior,
-  ]
+  const allFindings: AnyFinding[] = [...report.exterior, ...(report.bazhai?.findings ?? []), ...report.interior]
   const relevant = focusAreas.length === 0
     ? allFindings
     : allFindings.filter((f) => f.affects?.some((a) => focusAreas.includes(a)))
   const negatives = relevant.filter((f) => f.score < 0).sort((a, b) => a.score - b.score)
   const positives = relevant.filter((f) => f.score > 0).sort((a, b) => b.score - a.score)
 
+  const placements = assessment.placements.map((p) => ({ room: p.room, palaces: p.palaces ?? [p.primaryPalace] }))
+  const annualList = annualNotes(annual, placements, (r) => ROOM_INFO[r as RoomType]?.label ?? r)
+  const fs = report.flyingStars
+  const focusEntries = FOCUS_AREA_OPTIONS.filter((o) => report.focusScores[o.area] !== undefined)
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>综合风水报告</Text>
-      <Text style={styles.address}>{assessment.address}</Text>
-
+    <Screen>
       {/* ── 总评 ── */}
-      <View style={[styles.ratingCard, { backgroundColor: RATING_BG_V3[report.overallRating] }]}>
-        <Text style={[styles.ratingBig, { color: RATING_COLOR_V3[report.overallRating] }]}>
-          {report.overallRating}
-        </Text>
-        <Text style={styles.ratingSummary}>{report.summary}</Text>
-      </View>
+      <Card tone="gold" style={{ alignItems: "center", gap: 10 }}>
+        <Text style={styles.addr} numberOfLines={2}>{assessment.address}</Text>
+        <Text style={styles.orient}>{report.orientationText}</Text>
+        <ScoreDial score={Math.round(report.overallScore)} rating={report.overallRating} />
+        <Text style={styles.summary}>{report.summary}</Text>
+      </Card>
 
-      {/* ── 定向 ── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>🧭 定向</Text>
-        <Text style={styles.cardBody}>{report.orientationText}</Text>
-      </View>
+      {/* ── 分层得分 ── */}
+      <Card>
+        <SectionTitle>分层得分</SectionTitle>
+        <ScoreBar label="定向" score={report.sections.orientation.score} />
+        {fs && <ScoreBar label="玄空飞星" score={report.sections.flyingStars.score} />}
+        <ScoreBar label="外局峦头" score={report.sections.exterior.score} />
+        {report.bazhai && <ScoreBar label="八宅内局" score={report.sections.bazhai.score} />}
+        <ScoreBar label="室内细节" score={report.sections.interior.score} />
+      </Card>
+
+      {focusEntries.length > 0 && (
+        <Card>
+          <SectionTitle>各方面运势倾向</SectionTitle>
+          {focusEntries.map((o) => (
+            <ScoreBar key={o.area} label={`${o.icon} ${o.area.slice(0, 2)}`} score={report.focusScores[o.area] ?? 0} />
+          ))}
+        </Card>
+      )}
 
       {/* ── 玄空飞星盘 ── */}
-      {report.flyingStars && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>✨ 玄空飞星</Text>
-          <Text style={styles.cardBody}>{report.flyingStarSummary}</Text>
-          <Text style={styles.patternAdvice}>
-            {PATTERN_MEANING[report.flyingStars.pattern].advice}
-          </Text>
-
-          {/* 九宫飞星图 */}
-          <View style={styles.starGrid}>
-            {PALACE_ORDER_GRID.map((row, ri) => (
-              <View key={ri} style={styles.starRow}>
-                {row.map((p) => {
-                  const s = report.flyingStars!.palaces[p]
-                  return (
-                    <View key={p} style={[styles.starCell, p === "CENTER" && styles.starCellCenter]}>
-                      <Text style={styles.starDir}>{PALACE_INFO[p].label}</Text>
-                      <Text style={styles.starNums}>
-                        <Text style={styles.starMountain}>{s.mountain}</Text>
-                        {"  "}
-                        <Text style={styles.starFacing}>{s.facing}</Text>
-                      </Text>
-                      <Text style={styles.starBase}>{s.base}</Text>
-                    </View>
-                  )
-                })}
-              </View>
-            ))}
-          </View>
-          <Text style={styles.starLegend}>每宫：左=山星 右=向星 下=运星</Text>
-
+      {fs && (
+        <Card>
+          <SectionTitle right={<Badge label={fs.pattern} tone={PATTERN_MEANING[fs.pattern].rating === "凶" ? "bad" : "good"} />}>
+            玄空飞星
+          </SectionTitle>
+          <Text style={styles.body}>{report.flyingStarSummary}</Text>
+          <Text style={styles.advice}>{PATTERN_MEANING[fs.pattern].advice}</Text>
+          <NineGrid
+            renderCell={(p) => {
+              const s = fs.palaces[p]
+              return (
+                <>
+                  <Text style={styles.starNums}>
+                    <Text style={{ color: C.mountainStar }}>{s.mountain}</Text>
+                    {"  "}
+                    <Text style={{ color: C.facingStar }}>{s.facing}</Text>
+                  </Text>
+                  <Text style={styles.starBase}>{s.base}</Text>
+                </>
+              )
+            }}
+          />
+          <Text style={styles.legend}>每宫：山星（金，管人丁健康）· 向星（蓝，管财运）· 下方为运星</Text>
           {report.palaceNotes.length > 0 && (
-            <View style={styles.notesBox}>
+            <View style={styles.notes}>
               {report.palaceNotes.map((n, i) => (
-                <Text key={i} style={[styles.noteText, n.good ? styles.noteGood : styles.noteBad]}>
-                  {n.good ? "✓" : "⚠"} {n.text}
-                </Text>
+                <Text key={i} style={[styles.note, { color: n.good ? C.good : C.bad }]}>{n.good ? "✓" : "⚠"} {n.text}</Text>
               ))}
             </View>
           )}
-        </View>
+        </Card>
       )}
 
-      {/* ── 运势关注 ── */}
-      <View style={styles.card}>
+      {/* ── 流年 ── */}
+      <Card>
+        <SectionTitle right={<Text style={styles.link} onPress={() => router.push("/annual")}>详情 ›</Text>}>
+          {annual.year} {annual.ganzhi}年流年 · {ANNUAL_STAR_INFO[annual.centerStar].short}入中
+        </SectionTitle>
+        {annualList.slice(0, 6).map((n, i) => (
+          <Text key={i} style={[styles.note, { color: n.good ? C.good : C.textSub }]}>{n.good ? "✓" : "⚠"} {n.text}</Text>
+        ))}
+      </Card>
+
+      {/* ── 运势关注筛选 ── */}
+      <Card>
         <FocusAreaPicker selected={focusAreas} onChange={setFocusAreas} />
-      </View>
+      </Card>
 
-      {/* ── 问题 ── */}
       {negatives.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>⚠ 不利格局（{negatives.length}）</Text>
-          {negatives.map((f) => (
-            <View key={f.id} style={[styles.findingRow, styles.findingBad]}>
-              <Text style={styles.findingName}>{f.name} <Text style={styles.findingLoc}>{f.location}</Text></Text>
-              <Text style={styles.findingDesc}>{f.description}</Text>
-              {f.classic && <Text style={styles.findingClassic}>📜 {f.classic}</Text>}
-              {f.suggestion && <Text style={styles.findingSug}>💡 {f.suggestion}</Text>}
-            </View>
-          ))}
-        </View>
+        <Card>
+          <SectionTitle right={<Badge label={`${negatives.length}`} tone="bad" />}>需要注意</SectionTitle>
+          {negatives.map((f) => <FindingItem key={f.id} f={f} good={false} />)}
+        </Card>
       )}
 
-      {/* ── 优势 ── */}
       {positives.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>✓ 有利格局（{positives.length}）</Text>
-          {positives.map((f) => (
-            <View key={f.id} style={[styles.findingRow, styles.findingGood]}>
-              <Text style={styles.findingName}>{f.name} <Text style={styles.findingLoc}>{f.location}</Text></Text>
-              <Text style={styles.findingDesc}>{f.description}</Text>
-              {f.classic && <Text style={styles.findingClassic}>📜 {f.classic}</Text>}
-            </View>
-          ))}
-        </View>
+        <Card>
+          <SectionTitle right={<Badge label={`${positives.length}`} tone="good" />}>有利格局</SectionTitle>
+          {positives.map((f) => <FindingItem key={f.id} f={f} good />)}
+        </Card>
       )}
 
-      {/* ── 优先行动 ── */}
+      {negatives.length + positives.length === 0 && (
+        <Notice tone="info">{focusAreas.length ? "所选方面没有明显的吉凶格局。" : "暂无具体格局。放置更多房间、确认外局地物后结果会更完整。"}</Notice>
+      )}
+
       {report.topActions.length > 0 && (
-        <View style={styles.tipsBox}>
-          <Text style={styles.tipsTitle}>优先改善行动</Text>
+        <Card tone="warn">
+          <SectionTitle>优先改善行动</SectionTitle>
           {report.topActions.map((t, i) => (
-            <Text key={i} style={styles.tipText}>{i + 1}. {t}</Text>
+            <Text key={i} style={styles.action}>{i + 1}. {t}</Text>
           ))}
-        </View>
+        </Card>
       )}
 
-      {/* ── 深度报告（付费 $1.99）── */}
+      {/* ── 深度报告（付费）── */}
       {!assessment.aiUnlocked ? (
-        <View style={[styles.card, styles.paywallCard]}>
-          <Text style={styles.paywallTitle}>📜 解锁深度风水报告</Text>
-          <Text style={styles.paywallPrice}>{DEEP_REPORT_PRICE} <Text style={styles.paywallPriceSub}>· 本套房产一次性</Text></Text>
-          <View style={styles.paywallFeatures}>
-            {[
-              "AI 顾问 800-1000 字七节深度分析",
-              "逐房间布置建议（颜色/材质/摆放）",
-              "五行调理方案 + 居住注意事项",
-              "改善行动按「立刻/一月内/装修时」排期",
-              "含飞星盘/房间布局/外局方位三张图",
-              "可打印成 PDF 存档分享",
-              "网络异常也保证出报告（本地规则引擎兜底）",
-            ].map((f) => (
-              <Text key={f} style={styles.paywallFeature}>✓ {f}</Text>
-            ))}
-          </View>
-          <Pressable onPress={handleBuy} style={styles.buyBtn}>
-            <Text style={styles.buyBtnText}>解锁深度报告 {DEEP_REPORT_PRICE}</Text>
-          </Pressable>
-          {PURCHASE_TEST_MODE && (
-            <Text style={styles.testModeNote}>测试模式：正式版将通过 App Store 内购</Text>
-          )}
-        </View>
+        <Card tone="gold" style={styles.paywall}>
+          <Text style={styles.payTitle}>深度风水报告</Text>
+          <Text style={styles.payPrice}>{price}<Text style={styles.paySub}>  · 本套房产一次性</Text></Text>
+          {[
+            "资深顾问视角的 800–1000 字七节深度分析",
+            "逐房间布置建议：颜色、材质、摆放",
+            "五行调理方案 + 今年流年宜忌",
+            "改善行动按「立刻 / 一月内 / 装修时」排期",
+            "PDF 报告附飞星盘、房间布局、外局方位三张图",
+          ].map((f) => <Text key={f} style={styles.payFeat}>✓ {f}</Text>)}
+          <Button title={`解锁深度报告 ${price}`} onPress={handleBuy} loading={buying} />
+          {isPurchaseTestMode() && <Text style={styles.testNote}>演示/开发模式：不会真实扣款</Text>}
+        </Card>
       ) : (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>📜 深度风水报告 <Text style={styles.unlockedTag}>已解锁</Text></Text>
-          {aiLoading && (
+        <Card>
+          <SectionTitle right={<Badge label="已解锁" tone="good" />}>深度风水报告</SectionTitle>
+          {aiLoading ? (
             <View style={styles.loadingRow}>
-              <ActivityIndicator color="#8d6b4c" />
-              <Text style={styles.loadingText}>顾问撰写中（约 30 秒）…</Text>
+              <ActivityIndicator color={C.gold} />
+              <Text style={styles.loadingText}>顾问撰写中，约 30–60 秒…</Text>
             </View>
-          )}
-          {aiError && (
-            <>
-              <Text style={styles.errorText}>{aiError}</Text>
-              <Pressable onPress={runAI} style={styles.aiBtn}>
-                <Text style={styles.aiBtnText}>重试（已购买，不再收费）</Text>
-              </Pressable>
-            </>
-          )}
-          {!aiLoading && !aiError && assessment.reportText && (
+          ) : assessment.reportText ? (
             <>
               <Text style={styles.aiText}>{assessment.reportText}</Text>
-              <Pressable onPress={runAI} style={styles.regenBtn}>
-                <Text style={styles.regenBtnText}>↻ 重新生成</Text>
-              </Pressable>
+              <Button small variant="ghost" title="↻ 重新生成（不再收费）" onPress={runAI} />
             </>
+          ) : (
+            <Button title="生成深度报告" onPress={runAI} />
           )}
-          {!aiLoading && !aiError && !assessment.reportText && (
-            <Pressable onPress={runAI} style={styles.aiBtn}>
-              <Text style={styles.aiBtnText}>生成深度报告</Text>
-            </Pressable>
-          )}
-        </View>
+        </Card>
       )}
 
-      {/* ── 打印 / 导出 PDF ── */}
-      <Pressable onPress={handlePrint} style={styles.printBtn}>
-        <Text style={styles.printBtnText}>🖨 打印 / 导出 PDF（含三张配图）</Text>
-      </Pressable>
-
-      <Pressable
-        onPress={() => { saveToHistory(); router.push("/history") }}
-        style={styles.saveBtn}
-      >
-        <Text style={styles.saveBtnText}>保存到历史记录</Text>
-      </Pressable>
-    </ScrollView>
+      <Button
+        variant="secondary"
+        title={Platform.OS === "web" ? "🖨 打印 / 导出 PDF" : "📄 导出 PDF 报告并分享"}
+        onPress={handleExport}
+        loading={exporting}
+      />
+      <Button title="返回首页" variant="ghost" onPress={() => router.dismissAll()} />
+      <Text style={styles.disclaimer}>本报告基于传统风水文化自动生成，仅供文化娱乐参考，不构成任何决策建议。报告已自动保存到「记录」。</Text>
+    </Screen>
   )
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, backgroundColor: "#fffaf3", gap: 14, flexGrow: 1 },
-  title:     { fontSize: 24, fontWeight: "800", color: "#2a2118" },
-  address:   { fontSize: 13, color: "#8d6b4c", marginTop: -8 },
-  copy:      { fontSize: 14, color: "#5a4a3c" },
+  addr:    { fontSize: 16, fontWeight: "800", color: C.text, textAlign: "center" },
+  orient:  { fontSize: 12, color: C.textSub, textAlign: "center" },
+  summary: { fontSize: 14, color: C.text, textAlign: "center", lineHeight: 22 },
+  dialRating: { fontSize: 34, fontWeight: "900", letterSpacing: 2 },
+  dialScore:  { fontSize: 12, color: C.textMuted },
 
-  ratingCard: { borderRadius: 18, padding: 18, alignItems: "center", gap: 6 },
-  ratingBig:  { fontSize: 48, fontWeight: "900" },
-  ratingSummary: { fontSize: 14, color: "#2a2118", textAlign: "center", lineHeight: 22 },
+  body:     { fontSize: 14, color: C.textSub, lineHeight: 22 },
+  advice:   { fontSize: 13, color: C.goldBright, lineHeight: 20 },
+  starNums: { fontSize: 18, fontWeight: "900" },
+  starBase: { fontSize: 10, color: C.textMuted },
+  legend:   { fontSize: 11, color: C.textMuted, textAlign: "center" },
+  notes:    { gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.line },
+  note:     { fontSize: 12, lineHeight: 19 },
+  link:     { fontSize: 12, color: C.goldBright, fontWeight: "700" },
 
-  card: {
-    backgroundColor: "#fff", borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: "#eadfce", gap: 10,
-  },
-  cardTitle: { fontSize: 16, fontWeight: "800", color: "#2a2118" },
-  cardBody:  { fontSize: 14, color: "#46392c", lineHeight: 22 },
-  patternAdvice: { fontSize: 13, color: "#6b3e1a", lineHeight: 20, fontStyle: "italic" },
+  finding: { borderLeftWidth: 3, borderRadius: 8, padding: 12, gap: 4, backgroundColor: C.surface2 },
+  fName:    { fontSize: 14, fontWeight: "800", color: C.text },
+  fLoc:     { fontSize: 11, fontWeight: "400", color: C.textMuted },
+  fDesc:    { fontSize: 13, color: C.textSub, lineHeight: 19 },
+  fClassic: { fontSize: 12, color: C.goldDeep, fontStyle: "italic" },
+  fSug:     { fontSize: 13, color: C.good, lineHeight: 19 },
 
-  starGrid: { gap: 4, marginTop: 4 },
-  starRow:  { flexDirection: "row", gap: 4 },
-  starCell: {
-    flex: 1, aspectRatio: 1.1,
-    backgroundColor: "#fdf5ea", borderRadius: 8,
-    borderWidth: 1, borderColor: "#e3d0b0",
-    alignItems: "center", justifyContent: "center", gap: 1,
-  },
-  starCellCenter: { backgroundColor: "#f0e4cc" },
-  starDir:   { fontSize: 10, color: "#8d6b4c" },
-  starNums:  { fontSize: 17, fontWeight: "900" },
-  starMountain: { color: "#6b3e1a" },
-  starFacing:   { color: "#1a4b6b" },
-  starBase:  { fontSize: 10, color: "#9b8878" },
-  starLegend:{ fontSize: 11, color: "#9b8878", textAlign: "center" },
+  action: { fontSize: 13, color: C.text, lineHeight: 20 },
 
-  notesBox: { gap: 5, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#f0e8da" },
-  noteText: { fontSize: 12, lineHeight: 18 },
-  noteGood: { color: "#2d6a3f" },
-  noteBad:  { color: "#c0392b" },
+  paywall:  { borderWidth: 1.5, borderColor: C.gold },
+  payTitle: { fontSize: 19, fontWeight: "900", color: C.goldBright, textAlign: "center", letterSpacing: 2 },
+  payPrice: { fontSize: 30, fontWeight: "900", color: C.text, textAlign: "center" },
+  paySub:   { fontSize: 13, fontWeight: "600", color: C.textMuted },
+  payFeat:  { fontSize: 13, color: C.textSub, lineHeight: 20 },
+  testNote: { fontSize: 11, color: C.textFaint, textAlign: "center" },
 
-  findingRow: { borderLeftWidth: 4, borderRadius: 10, padding: 12, gap: 4, backgroundColor: "#faf6f0" },
-  findingBad:  { borderLeftColor: "#c0392b" },
-  findingGood: { borderLeftColor: "#2d6a3f" },
-  findingName: { fontSize: 14, fontWeight: "800", color: "#2a2118" },
-  findingLoc:  { fontSize: 11, fontWeight: "400", color: "#9b8878" },
-  findingDesc: { fontSize: 13, color: "#46392c", lineHeight: 19 },
-  findingClassic: { fontSize: 12, color: "#8d6b4c", fontStyle: "italic" },
-  findingSug:  { fontSize: 13, color: "#2d6a3f", lineHeight: 19 },
-
-  tipsBox:   { backgroundColor: "#f0e8da", borderRadius: 14, padding: 14, gap: 8 },
-  tipsTitle: { fontSize: 14, fontWeight: "800", color: "#2a2118" },
-  tipText:   { fontSize: 13, color: "#46392c", lineHeight: 20 },
-
-  loadingRow: { flexDirection: "row", gap: 8, alignItems: "center" },
-  loadingText:{ color: "#8d6b4c", fontSize: 13 },
-  errorText:  { color: "#c0392b", fontSize: 13, lineHeight: 19 },
-  aiBtn:      { backgroundColor: "#8d6b4c", borderRadius: 12, paddingVertical: 13, alignItems: "center" },
-  aiBtnText:  { color: "#fff", fontWeight: "800", fontSize: 15 },
-  aiText:     { fontSize: 14, color: "#2a2118", lineHeight: 23 },
-
-  saveBtn:     { backgroundColor: "#2a2118", paddingVertical: 16, borderRadius: 16, alignItems: "center" },
-  saveBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
-
-  // 付费墙
-  paywallCard:  { borderWidth: 2, borderColor: "#c8a030", backgroundColor: "#fffcf4" },
-  paywallTitle: { fontSize: 18, fontWeight: "900", color: "#6b3e1a", textAlign: "center" },
-  paywallPrice: { fontSize: 30, fontWeight: "900", color: "#2a2118", textAlign: "center" },
-  paywallPriceSub: { fontSize: 13, fontWeight: "600", color: "#8d6b4c" },
-  paywallFeatures: { gap: 5, marginVertical: 4 },
-  paywallFeature:  { fontSize: 13, color: "#46392c", lineHeight: 20 },
-  buyBtn: {
-    backgroundColor: "#c8a030", paddingVertical: 15,
-    borderRadius: 14, alignItems: "center",
-  },
-  buyBtnText:   { color: "#2a1300", fontWeight: "900", fontSize: 16 },
-  testModeNote: { fontSize: 11, color: "#bfad9c", textAlign: "center" },
-  unlockedTag:  { fontSize: 11, color: "#2d6a3f", fontWeight: "700" },
-  regenBtn:     { alignSelf: "center", paddingVertical: 8 },
-  regenBtnText: { fontSize: 13, color: "#8d6b4c", textDecorationLine: "underline" },
-
-  // 打印
-  printBtn: {
-    backgroundColor: "#6b3e1a", paddingVertical: 15,
-    borderRadius: 16, alignItems: "center",
-    borderWidth: 1.5, borderColor: "#c8a030",
-  },
-  printBtnText: { color: "#f0d060", fontWeight: "800", fontSize: 15 },
+  loadingRow:  { flexDirection: "row", gap: 8, alignItems: "center" },
+  loadingText: { color: C.textSub, fontSize: 13 },
+  aiText:      { fontSize: 14, color: C.text, lineHeight: 24 },
+  disclaimer:  { fontSize: 11, color: C.textFaint, textAlign: "center", lineHeight: 17 },
 })

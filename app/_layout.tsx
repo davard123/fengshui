@@ -1,7 +1,10 @@
 import { Stack } from "expo-router"
 import { useEffect } from "react"
+import { StatusBar } from "react-native"
+import { SafeAreaProvider } from "react-native-safe-area-context"
 import { readStorageValue, writeStorageValue } from "@/lib/storage"
 import { useAppStore } from "@/store/useAppStore"
+import { C } from "@/lib/theme"
 
 const STORAGE_KEY = "fengshui-app-state-v3"
 
@@ -49,17 +52,34 @@ export default function RootLayout() {
   }, [])
 
   return (
-    <Stack screenOptions={{ headerTitleAlign: "center" }}>
-      <Stack.Screen name="index"       options={{ title: "风水评估", headerShown: false }} />
-      <Stack.Screen name="address"     options={{ title: "定位房屋" }} />
-      <Stack.Screen name="orientation" options={{ title: "定向" }} />
-      <Stack.Screen name="exterior"    options={{ title: "外局" }} />
-      <Stack.Screen name="palaces"     options={{ title: "九宫内局" }} />
-      <Stack.Screen name="room-detail" options={{ title: "房间细节" }} />
-      <Stack.Screen name="report"      options={{ title: "综合报告" }} />
-      <Stack.Screen name="setup"       options={{ title: "住户信息" }} />
-      <Stack.Screen name="history"     options={{ title: "历史记录" }} />
-      <Stack.Screen name="settings"    options={{ title: "设置" }} />
-    </Stack>
+    <SafeAreaProvider>
+      <StatusBar barStyle="light-content" />
+      <Stack
+        screenOptions={{
+          headerTitleAlign: "center",
+          headerStyle: { backgroundColor: C.bg },
+          headerTintColor: C.goldBright,
+          headerTitleStyle: { color: C.text, fontWeight: "800" },
+          headerShadowVisible: false,
+          headerBackTitle: "返回",
+          contentStyle: { backgroundColor: C.bg },
+        }}
+      >
+        <Stack.Screen name="(tabs)"      options={{ headerShown: false, title: "首页" }} />
+        <Stack.Screen name="address"     options={{ title: "定位房屋" }} />
+        <Stack.Screen name="orientation" options={{ title: "定向" }} />
+        <Stack.Screen name="exterior"    options={{ title: "外局" }} />
+        <Stack.Screen name="palaces"     options={{ title: "九宫内局" }} />
+        <Stack.Screen name="room-detail" options={{ title: "房间细节" }} />
+        <Stack.Screen name="report"      options={{ title: "综合报告" }} />
+        <Stack.Screen name="setup"       options={{ title: "住户命卦", presentation: "modal" }} />
+        <Stack.Screen name="kua"         options={{ title: "个人吉凶方" }} />
+        <Stack.Screen name="annual"      options={{ title: "流年飞星" }} />
+        <Stack.Screen name="compass"     options={{ title: "罗盘" }} />
+        <Stack.Screen name="learn"       options={{ title: "风水入门" }} />
+        <Stack.Screen name="privacy"     options={{ title: "隐私政策" }} />
+        <Stack.Screen name="ai-settings" options={{ title: "高级设置" }} />
+      </Stack>
+    </SafeAreaProvider>
   )
 }

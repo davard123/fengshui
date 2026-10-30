@@ -1,51 +1,72 @@
 {
   "expo": {
-    "name": "九宫风水参考",
+    "name": "九宫风水",
     "slug": "fengshui-app",
     "scheme": "fengshui-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#fffaf3"
-    },
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#13100c",
     "platforms": ["ios", "android", "web"],
 
     "ios": {
       "bundleIdentifier": "com.davidlo.fengshuiapp",
-      "buildNumber": "1",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "用于在地图上定位您输入的房产地址，进行周边环境分析。",
-        "NSMotionUsageDescription": "用于读取手机指南针（磁力计），帮助您锁定房屋的精确朝向。",
+        "CFBundleDevelopmentRegion": "zh_CN",
+        "CFBundleAllowMixedLocalizations": true,
+        "NSLocationWhenInUseUsageDescription": "罗盘需要读取「真北」方向来精确测量房屋朝向；应用不会记录或上传你的位置。",
+        "NSMotionUsageDescription": "用于读取手机方向传感器，作为罗盘测量房屋和房间的朝向。",
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          }
+        ]
       }
     },
 
     "android": {
       "package": "com.davidlo.fengshuiapp",
-      "versionCode": 1,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#fffaf3"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#13100c"
       },
-      "permissions": []
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
     },
 
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./assets/favicon.png"
     },
 
     "plugins": [
-      "expo-router/plugin",
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#13100c"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "罗盘需要读取「真北」方向来精确测量房屋朝向；应用不会记录或上传你的位置。"
+        }
+      ],
       [
         "expo-sensors",
-        { "motionPermission": "用于读取罗盘/指南针方向数据。" }
-      ]
+        { "motionPermission": "用于读取手机方向传感器，作为罗盘测量房屋和房间的朝向。" }
+      ],
+      "expo-iap"
     ],
 
     "extra": {

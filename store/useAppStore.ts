@@ -46,7 +46,10 @@ type AppState = {
   setReportText: (text: string) => void
   setAiUnlocked: (unlocked: boolean) => void
   saveToHistory: () => void
+  deleteHistory: (id: string) => void
+  openFromHistory: (id: string) => void
   resetAssessment: () => void
+  clearAllData: () => void
 }
 
 const INITIAL_COMPASS: CompassState = { degree: 0, direction: "N", locked: false }
@@ -72,17 +75,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   setCompass: (next) => set((s) => ({ compass: { ...s.compass, ...next } })),
 
   startAssessment: (address) =>
-    set({
+    set((s) => ({
       assessment: {
         id: `v3-${Date.now()}`,
         address,
+        // 住户命卦跟随评估：先填档案再开始评估时也要带上
+        profile: s.profile ?? undefined,
         external: [],
         placements: [],
         checklists: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-    }),
+    })),
 
   setFootprint: (fp) =>
     set((s) => s.assessment
@@ -151,5 +156,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ history: [item, ...rest].slice(0, 30) })
   },
 
+  deleteHistory: (id) =>
+    set((s) => ({
+      history: s.history.filter((h) => !(h.format === "v3" && h.data.id === id)),
+      assessment: s.assessment?.id === id ? null : s.assessment,
+    })),
+
+  openFromHistory: (id) => {
+    const hit = get().history.find((h) => h.format === "v3" && h.data.id === id)
+    if (hit && hit.format === "v3") set({ assessment: hit.data })
+  },
+
   resetAssessment: () => set({ assessment: null, compass: INITIAL_COMPASS }),
+
+  clearAllData: () => set({ profile: null, assessment: null, history: [], compass: INITIAL_COMPASS }),
 }))
